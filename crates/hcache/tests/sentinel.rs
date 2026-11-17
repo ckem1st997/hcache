@@ -354,10 +354,15 @@ fn client_pause_holds_writes_or_everything_until_it_ends() {
     // PUBLISH waits as well: the replicas get it.
     publisher.send(&["PUBLISH", "ch", "m"]);
     assert!(publisher.silent_for(100), "PUBLISH ran during the pause");
+    // So does PFCOUNT, which may write the cache in its key.
+    let mut counter = s.client();
+    counter.send(&["PFCOUNT", "hll"]);
+    assert!(counter.silent_for(100), "PFCOUNT ran during the pause");
     assert_eq!(reader.cmd(&["GET", "k"]), Reply::Nil);
     ok(admin.cmd(&["CLIENT", "UNPAUSE"]));
     assert_eq!(writer.read(), Reply::Ok);
     assert_eq!(publisher.read(), Reply::Int(0));
+    assert_eq!(counter.read(), Reply::Int(0));
 
     // A pause ends by itself.
     ok(admin.cmd(&["CLIENT", "PAUSE", "300", "WRITE"]));

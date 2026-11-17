@@ -311,6 +311,8 @@ fn multi_plan(op: &MultiOp) -> Plan {
             same(&args)
         }
         MultiOp::PfMerge { dst, keys } => same(&with(&[b"PFMERGE", dst], keys)),
+        // It wrote the cache in its key; the replica works out the same.
+        MultiOp::PfCount(keys) => same(&with(&[b"PFCOUNT"], keys)),
         MultiOp::JsonMSet(triples) => {
             let mut args: Vec<&[u8]> = vec![b"JSON.MSET"];
             for (k, path, value) in triples {
@@ -1059,6 +1061,7 @@ mod tests {
             "ZMPOP 1 z MIN COUNT 1",
             "BITOP XOR d a b",
             "BITOP NOT d a",
+            "PFCOUNT h",
         ] {
             let cmd = parse(line);
             let Plan::Same(resp) = Plan::of(&cmd) else {

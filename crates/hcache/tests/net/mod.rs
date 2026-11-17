@@ -736,7 +736,9 @@ impl Workload {
                 if self.rng.chance(2) {
                     (
                         parts(&["NOSUCHCMD", "x"]),
-                        Exact(Reply::err("ERR unknown command 'NOSUCHCMD'")),
+                        Exact(Reply::err(
+                            "ERR unknown command 'NOSUCHCMD', with args beginning with: 'x' ",
+                        )),
                     )
                 } else {
                     (

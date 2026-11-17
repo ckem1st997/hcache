@@ -98,10 +98,38 @@ fn a_replica_gets_the_data_and_every_write_after_it() {
         "{refused:?}"
     );
     let script = r.cmd(&["EVAL", "return redis.call('SET', 'x', '1')", "0"]);
-    assert!(matches!(script, Reply::Error(_)), "{script:?}");
+    assert!(
+        matches!(&script, Reply::Error(e) if e.contains("READONLY")),
+        "{script:?}"
+    );
     assert_eq!(
         r.cmd(&["EVAL", "return redis.call('GET', KEYS[1])", "1", "after"]),
         Reply::bulk("2")
+    );
+    // As in Valkey, a plain script on a replica may still call what is
+    // refused to EVAL_RO because it may replicate.
+    assert_eq!(
+        r.cmd(&[
+            "EVAL",
+            "return redis.call('PFCOUNT', KEYS[1])",
+            "1",
+            "nohll"
+        ]),
+        Reply::Int(0)
+    );
+    assert_eq!(
+        r.cmd(&["EVAL", "return redis.call('PUBLISH', 'ch', 'x')", "0"]),
+        Reply::Int(0)
+    );
+    let ro = r.cmd(&[
+        "EVAL_RO",
+        "return redis.call('PFCOUNT', KEYS[1])",
+        "1",
+        "nohll",
+    ]);
+    assert!(
+        matches!(&ro, Reply::Error(e) if e.contains("read-only scripts")),
+        "{ro:?}"
     );
 
     // What each side says of the other.

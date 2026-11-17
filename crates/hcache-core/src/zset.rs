@@ -7,6 +7,7 @@
 //! millions of members.
 
 use crate::dict::{hash_bytes, Dict};
+use crate::{float, fpconv};
 use std::cmp::Ordering;
 
 type Entry = (f64, Box<[u8]>);
@@ -14,10 +15,20 @@ type Entry = (f64, Box<[u8]>);
 /// A chunk longer than this is split in two.
 const MAX_CHUNK: usize = 512;
 
+/// Valkey holds a sorted set of at most this many members, none longer
+/// than `LISTPACK_VALUE` bytes, in a listpack, and moves it to a skiplist
+/// for good once either is passed (the `zset-max-listpack-*` defaults).
+const LISTPACK_ENTRIES: usize = 128;
+const LISTPACK_VALUE: usize = 64;
+
 #[derive(Clone, Default)]
 pub struct ZSet {
     scores: Dict<f64>,
     chunks: Vec<Vec<Entry>>,
+    /// Valkey would hold this set in a skiplist. A listpack stores a
+    /// whole-number score as an integer, so -0 reads back as 0, and finds
+    /// a member range by walking its entries.
+    skiplist: bool,
 }
 
 fn order(a_score: f64, a: &[u8], b_score: f64, b: &[u8]) -> Ordering {
@@ -55,8 +66,32 @@ impl ZSet {
         self.chunks[..ci].iter().map(Vec::len).sum::<usize>() + pos
     }
 
+    /// Whether Valkey would hold this set in a listpack.
+    pub fn is_listpack(&self) -> bool {
+        !self.skiplist
+    }
+
+    /// Valkey's guess before adding `members` members, the longest
+    /// `longest` bytes long (ZADD, ZRANGESTORE, a set built whole): past
+    /// either limit the set is a skiplist from the start.
+    pub fn expect(&mut self, members: usize, longest: usize) {
+        self.skiplist |= members > LISTPACK_ENTRIES || longest > LISTPACK_VALUE;
+    }
+
     /// Set the member's score. Returns the score it had.
-    pub fn insert(&mut self, member: &[u8], score: f64) -> Option<f64> {
+    pub fn insert(&mut self, member: &[u8], mut score: f64) -> Option<f64> {
+        if !self.skiplist {
+            // A new member that does not fit moves the set to a skiplist
+            // before it goes in.
+            if member.len() > LISTPACK_VALUE
+                || (self.len() >= LISTPACK_ENTRIES && self.score(member).is_none())
+            {
+                self.skiplist = true;
+            } else if score == 0.0 {
+                // -0 too: the listpack keeps it as the integer 0.
+                score = 0.0;
+            }
+        }
         let old = self.scores.insert(hash_bytes(member), member, score);
         if let Some(old) = old {
             if old == score {
@@ -169,35 +204,37 @@ impl ZSet {
     }
 }
 
-/// A score as Redis prints it.
+/// A score as Valkey prints it (d2string): integers up to 2^62 as they
+/// are, anything else through fpconv.
 pub fn format_score(score: f64) -> Vec<u8> {
-    if score == f64::INFINITY {
-        b"inf".to_vec()
-    } else if score == f64::NEG_INFINITY {
-        b"-inf".to_vec()
-    } else {
-        format!("{score}").into_bytes()
+    if score.is_nan() {
+        return b"nan".to_vec();
     }
+    if score.is_infinite() {
+        return if score > 0.0 { &b"inf"[..] } else { b"-inf" }.to_vec();
+    }
+    if score == 0.0 {
+        return if score.is_sign_negative() {
+            &b"-0"[..]
+        } else {
+            b"0"
+        }
+        .to_vec();
+    }
+    // double2ll: past 2^62 an integer goes through fpconv too.
+    let safe = (i64::MAX / 2) as f64;
+    if (-safe..=safe).contains(&score) && score.fract() == 0.0 {
+        return (score as i64).to_string().into_bytes();
+    }
+    let mut out = Vec::with_capacity(24);
+    fpconv::dtoa(score, &mut out);
+    out
 }
 
-/// A float argument: any finite number, or an infinity. Never NaN.
+/// A float argument as Valkey's string2d reads it: any finite number, or
+/// an infinity. Never NaN.
 pub fn parse_float(raw: &[u8]) -> Option<f64> {
-    let text = std::str::from_utf8(raw).ok()?;
-    let value = match text.to_ascii_lowercase().as_str() {
-        "inf" | "+inf" | "infinity" | "+infinity" => f64::INFINITY,
-        "-inf" | "-infinity" => f64::NEG_INFINITY,
-        _ => {
-            let ok = text
-                .bytes()
-                .all(|b| b.is_ascii_digit() || matches!(b, b'.' | b'-' | b'+' | b'e' | b'E'));
-            if !ok || text.is_empty() {
-                return None;
-            }
-            // Out of range ("1e400") is an error, as with strtod.
-            text.parse().ok().filter(|v: &f64| v.is_finite())?
-        }
-    };
-    (!f64::is_nan(value)).then_some(value)
+    float::parse_double(raw)
 }
 
 #[cfg(test)]
@@ -254,9 +291,55 @@ mod tests {
         assert_eq!(parse_float(b"1.5"), Some(1.5));
         assert_eq!(parse_float(b"-inf"), Some(f64::NEG_INFINITY));
         assert_eq!(parse_float(b"nan"), None);
+        assert_eq!(parse_float(b"0x10"), Some(16.0));
         assert_eq!(parse_float(b" 1"), None);
         assert_eq!(parse_float(b""), None);
         assert_eq!(format_score(3.0), b"3");
         assert_eq!(format_score(f64::INFINITY), b"inf");
+        assert_eq!(format_score(1e300), b"1e+300");
+        assert_eq!(format_score(-0.0), b"-0");
+        assert_eq!(format_score(4611686018427387904.0), b"4611686018427387904");
+        assert_eq!(format_score(9223372036854775808.0), b"9223372036854776000");
+        assert_eq!(format_score(1e19), b"1e+19");
+    }
+
+    fn sign_of(z: &ZSet, member: &[u8]) -> bool {
+        z.score(member).is_some_and(f64::is_sign_negative)
+    }
+
+    #[test]
+    fn a_listpack_keeps_minus_zero_as_zero_until_it_grows() {
+        let mut z = ZSet::default();
+        z.insert(b"a", -0.0);
+        assert!(z.is_listpack() && !sign_of(&z, b"a"));
+        assert_eq!(
+            z.range(0, 1).next().map(|(_, s)| s.is_sign_negative()),
+            Some(false)
+        );
+        // A long member moves it to a skiplist before it goes in, for good.
+        z.insert(&[b'm'; 65], -0.0);
+        assert!(!z.is_listpack() && sign_of(&z, &[b'm'; 65]));
+        z.remove(&[b'm'; 65]);
+        z.insert(b"b", -0.0);
+        assert!(!z.is_listpack() && sign_of(&z, b"b") && !sign_of(&z, b"a"));
+
+        // The 129th member, not an update of one of the 128.
+        let mut z = ZSet::default();
+        for i in 0..128 {
+            z.insert(format!("m{i}").as_bytes(), 1.0);
+        }
+        z.insert(b"m0", -0.0);
+        assert!(z.is_listpack() && !sign_of(&z, b"m0"));
+        z.insert(b"new", -0.0);
+        assert!(!z.is_listpack() && sign_of(&z, b"new"));
+
+        // A size given before the members come.
+        for (members, longest, listpack) in [(128, 64, true), (129, 1, false), (1, 65, false)] {
+            let mut z = ZSet::default();
+            z.expect(members, longest);
+            z.insert(b"a", -0.0);
+            assert_eq!(z.is_listpack(), listpack, "{members} {longest}");
+            assert_eq!(sign_of(&z, b"a"), !listpack, "{members} {longest}");
+        }
     }
 }

@@ -26,7 +26,7 @@ use crate::ops::{Aggregate, BitOp, KeyOp, MultiOp, ObjectSub, SetOp, XIds};
 use crate::persist::Fsync;
 use crate::resp::Reply;
 use crate::script::Scripts;
-use crate::shard::{HashScan, Policy, Prefetch, Shard, Versions, NOT_HLL, WRONGTYPE};
+use crate::shard::{HashScan, Policy, Prefetch, Shard, Versions, WRONGTYPE};
 use crate::sort;
 use crate::stream::{IdSpec, XOp};
 use crate::zset::format_score;
@@ -1874,23 +1874,6 @@ impl Engine {
         Reply::Int(n)
     }
 
-    /// The HyperLogLog strings at `keys`, without the keys that are missing.
-    fn sketches<'k, A: Access>(
-        &self,
-        keys: impl Iterator<Item = &'k Bytes>,
-        a: &mut A,
-    ) -> Result<Vec<Bytes>, Reply> {
-        let mut out = Vec::new();
-        for k in keys {
-            let (h, i) = self.route(k);
-            let sketch = a.with(i, |s| s.with_string(h, k, <[u8]>::to_vec))?;
-            if !sketch.is_empty() {
-                out.push(sketch);
-            }
-        }
-        Ok(out)
-    }
-
     /// A command over several keys. Every shard is visited on its own, so
     /// values travel between shards by value.
     fn apply_multi<A: Access>(&self, op: MultiOp, a: &mut A) -> Reply {
@@ -1953,29 +1936,34 @@ impl Engine {
                     _ => Reply::err("ERR The specified keys must contain string values"),
                 }
             }
-            MultiOp::PfCount(keys) => match self.sketches(keys.iter(), a) {
-                Err(wrong_type) => wrong_type,
-                Ok(sketches) => {
-                    let parts: Vec<&[u8]> = sketches.iter().map(Vec::as_slice).collect();
-                    match crate::hll::count(&parts) {
-                        Ok(n) => Reply::Int(i64::try_from(n).unwrap_or(i64::MAX)),
-                        Err(_) => Reply::err(NOT_HLL),
+            MultiOp::PfCount(keys) => {
+                // One key has a cache; several are counted as their union.
+                if let [key] = keys.as_slice() {
+                    let (h, i) = self.route(key);
+                    return a.with(i, |s| s.pfcount(h, key));
+                }
+                let mut max = vec![0u8; crate::hll::REGISTERS];
+                for k in &keys {
+                    let (h, i) = self.route(k);
+                    if let Err(e) = a.with(i, |s| s.hll_union(h, k, &mut max)) {
+                        return e;
                     }
                 }
-            },
+                Reply::Int(i64::try_from(crate::hll::count_union(&max)).unwrap_or(i64::MAX))
+            }
             MultiOp::PfMerge { dst, keys } => {
-                let sketches = match self.sketches(std::iter::once(&dst).chain(&keys), a) {
-                    Ok(sketches) => sketches,
-                    Err(wrong_type) => return wrong_type,
-                };
-                let parts: Vec<&[u8]> = sketches.iter().map(Vec::as_slice).collect();
-                let mut merged = crate::hll::new();
-                if crate::hll::merge(&mut merged, &parts).is_err() {
-                    return Reply::err(NOT_HLL);
+                // The destination counts as an input, and goes first.
+                let mut max = vec![0u8; crate::hll::REGISTERS];
+                let mut dense = false;
+                for k in std::iter::once(&dst).chain(&keys) {
+                    let (h, i) = self.route(k);
+                    match a.with(i, |s| s.hll_union(h, k, &mut max)) {
+                        Ok(found) => dense |= found == Some(true),
+                        Err(e) => return e,
+                    }
                 }
                 let (h, i) = self.route(&dst);
-                a.with(i, |s| s.replace_string(h, &dst, merged));
-                Reply::Ok
+                a.with(i, |s| s.pfmerge_store(h, &dst, &max, dense))
             }
             MultiOp::JsonMGet { keys, path } => {
                 let mut docs = Vec::with_capacity(keys.len());
@@ -2319,7 +2307,17 @@ impl Engine {
                 op,
                 withscores,
                 card,
+                bad_option,
             } => {
+                if let Some(error) = bad_option {
+                    for k in &keys {
+                        let (h, i) = self.route(k);
+                        if let Err(wrong_type) = a.with(i, |s| s.zset_entries(h, k)) {
+                            return wrong_type;
+                        }
+                    }
+                    return error;
+                }
                 let mut acc: HashMap<Vec<u8>, (f64, usize)> = HashMap::new();
                 for (n, (k, weight)) in keys.iter().zip(&weights).enumerate() {
                     let (h, i) = self.route(k);

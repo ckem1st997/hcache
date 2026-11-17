@@ -408,14 +408,21 @@ impl Decoder<'_> {
                         Value::Set(Box::new(set))
                     }
                     T_ZSET => {
-                        let mut zset = ZSet::default();
+                        let mut entries = Vec::new();
                         for _ in 0..self.count()? {
                             let member = self.bytes()?.to_vec();
                             let score = f64::from_bits(self.u64()?);
                             if score.is_nan() {
                                 return None;
                             }
-                            zset.insert(&member, score);
+                            entries.push((member, score));
+                        }
+                        // As Valkey loads one: a listpack if it fits.
+                        let mut zset = ZSet::default();
+                        let longest = entries.iter().map(|(m, _)| m.len()).max().unwrap_or(0);
+                        zset.expect(entries.len(), longest);
+                        for (member, score) in &entries {
+                            zset.insert(member, *score);
                         }
                         Value::ZSet(Box::new(zset))
                     }

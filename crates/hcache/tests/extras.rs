@@ -59,7 +59,12 @@ fn sorted_set_algebra() {
         ("ZINTERCARD 2 a b LIMIT 1", ":1"),
         ("ZINTERCARD 2 a b LIMIT 0", ":2"),
         ("ZINTERCARD 2 a b LIMIT -1", "-ERR LIMIT can't be negative"),
-        ("ZINTERCARD 0 a", "-ERR numkeys should be greater than 0"),
+        (
+            "ZINTERCARD 0 a",
+            "-ERR at least 1 input key is needed for 'zintercard' command",
+        ),
+        ("ZINTERCARD 1 a LIMIT abc", "-ERR LIMIT can't be negative"),
+        ("ZINTERCARD 2 a b LIMIT 1 LIMIT 0", ":2"),
         ("ZINTERCARD 3 a b", "-ERR syntax error"),
         (
             "ZUNION 0 a",
@@ -296,6 +301,7 @@ fn bit_positions_and_operations() {
     set("o", b"\xff\xff\xff");
     set("a", b"abc");
     set("b", b"ab");
+    set("one", b"1");
     for (line, want) in [
         ("BITPOS k 0", ":12"),
         ("BITPOS k 1", ":0"),
@@ -315,6 +321,14 @@ fn bit_positions_and_operations() {
         ("BITPOS o 0 5", ":-1"),
         ("BITPOS nokey 0", ":0"),
         ("BITPOS nokey 1", ":-1"),
+        // Captured from Valkey 9.1.3: both ends clamp to the first byte;
+        // only BITCOUNT treats two negative ends the wrong way round as
+        // nothing.
+        ("BITPOS one 0 -2 -100", ":0"),
+        ("BITPOS one 1 -2 -100", ":2"),
+        ("BITPOS one 0 -100 -2 BIT", ":0"),
+        ("BITCOUNT one -1 -2", ":0"),
+        ("BITCOUNT one -2 -100 BIT", ":0"),
         ("BITPOS k 2", "-ERR The bit argument must be 1 or 0."),
         ("BITPOS k 1 0 1 NOPE", "-ERR syntax error"),
         ("BITOP AND d a b", ":3"),
@@ -374,13 +388,19 @@ fn bits_match_a_model() {
         let (a, b) = (rand(700) as i64 - 350, rand(700) as i64 - 350);
         let clamp = |i: i64| if i < 0 { (len + i).max(0) } else { i };
         let (lo, hi) = (clamp(a), clamp(b).min(len - 1));
-        let empty = lo > hi || (a < 0 && b < 0 && a > b);
-        let range = if empty {
+        // BITPOS only clamps; BITCOUNT also answers 0 for two negative
+        // ends the wrong way round.
+        let range = if lo > hi {
             0..0
         } else {
             lo as usize..hi as usize + 1
         };
-        let ones = model[range.clone()].iter().filter(|&&x| x).count();
+        let counted = if a < 0 && b < 0 && a > b {
+            0..0
+        } else {
+            range.clone()
+        };
+        let ones = model[counted].iter().filter(|&&x| x).count();
         assert_eq!(
             run(&s, &format!("BITCOUNT m {a} {b} BIT")),
             format!(":{ones}"),
@@ -430,6 +450,23 @@ fn time_and_read_only_scripts() {
     ]));
     assert!(denied.starts_with('-'), "{denied}");
     assert_eq!(run(&s, "GET k"), "v");
+    // What may replicate counts as a write too, as in Valkey 9.1.
+    for call in [
+        "redis.call('PFCOUNT', 'nokey')",
+        "redis.call('PUBLISH', 'ch', 'x')",
+        "redis.call('SPUBLISH', 'ch', 'x')",
+    ] {
+        let denied = show(&s.execute(&["EVAL_RO", &format!("return {call}"), "0"]));
+        assert!(
+            denied.starts_with('-')
+                && denied.contains("Write commands are not allowed from read-only scripts."),
+            "{call}: {denied}"
+        );
+    }
+    assert_eq!(
+        show(&s.execute(&["EVAL", "return redis.call('PFCOUNT', 'nokey')", "0"])),
+        ":0"
+    );
 }
 
 /// The new multi-key commands inside transactions and across shards.

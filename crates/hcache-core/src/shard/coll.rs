@@ -1,11 +1,12 @@
 //! Lists, sets and sorted sets, and the newer string, hash and key
 //! commands: everything a `KeyOp` can ask of one key.
 
-use super::{wrongtype, Note, Shard, Value, MAX_STRING};
+use super::{wrongtype, Note, Shard, Value, HLL_CORRUPT, MAX_STRING, NOT_HLL};
 use crate::bitfield;
 use crate::bloom::{self, BfCmd, BfOp};
 use crate::cmd::Bytes;
 use crate::dict::{hash_bytes, Dict};
+use crate::float::{LongDouble, LongDoubleError};
 use crate::geo::{self, GeoOp};
 use crate::glob::glob_match;
 use crate::hll;
@@ -14,7 +15,7 @@ use crate::lazyfree::Reason;
 use crate::ops::{KeyOp, LexBound, ObjectSub, ZAddFlags, ZBound, ZBy, ZRangeSpec, NOT_FLOAT};
 use crate::resp::{parse_i64, Reply};
 use crate::stream::{StreamId, XOp};
-use crate::zset::{format_score, parse_float, ZSet};
+use crate::zset::{format_score, ZSet};
 use std::collections::{HashSet, VecDeque};
 
 const NO_KEY: &str = "ERR no such key";
@@ -22,6 +23,7 @@ const BAD_INDEX: &str = "ERR index out of range";
 /// Picks RANDOMKEY makes before it sweeps the expired keys away.
 const RANDOM_KEY_TRIES: usize = 8;
 const NAN_SCORE: &str = "ERR resulting score is not a number (NaN)";
+const NOT_FINITE: &str = "ERR increment would produce NaN or Infinity";
 
 fn bulk(v: &[u8]) -> Reply {
     Reply::Bulk(v.to_vec())
@@ -36,6 +38,28 @@ fn scan_reply(cursor: u64, items: Vec<Reply>) -> Reply {
         Reply::Bulk(cursor.to_string().into_bytes()),
         Reply::Array(items),
     ])
+}
+
+/// GETRANGE's own rules, which differ from `span`: an end before the
+/// first byte is clamped to it, so `GETRANGE k 0 -100` gives the first byte.
+fn byte_span(start: i64, end: i64, len: usize) -> Option<(usize, usize)> {
+    if len == 0 || (start < 0 && end < 0 && start > end) {
+        return None;
+    }
+    let len = len as i64;
+    let start = if start < 0 {
+        len.saturating_add(start)
+    } else {
+        start
+    }
+    .max(0);
+    let end = if end < 0 {
+        len.saturating_add(end)
+    } else {
+        end
+    }
+    .clamp(0, len - 1);
+    (start <= end).then(|| (start as usize, end as usize + 1))
 }
 
 /// `start..end` for Redis' inclusive indexes, where negative ones count
@@ -140,10 +164,10 @@ impl Shard {
 
     pub fn key_op(&mut self, h: u64, key: &[u8], op: KeyOp) -> Reply {
         match op {
-            KeyOp::IncrByFloat(by) => self.incr_by_float(h, key, by),
+            KeyOp::IncrByFloat(by) => self.incr_by_float(h, key, &by),
             KeyOp::GetRange(start, stop) => match self.live(h, key) {
                 None => Reply::Bulk(Vec::new()),
-                Some(Value::Str(v)) => match span(start, stop, v.len()) {
+                Some(Value::Str(v)) => match byte_span(start, stop, v.len()) {
                     Some((a, b)) => bulk(&v[a..b]),
                     None => Reply::Bulk(Vec::new()),
                 },
@@ -168,7 +192,7 @@ impl Shard {
                         .map_or(0, Vec::len) as i64,
                 ),
             },
-            KeyOp::HIncrByFloat(field, by) => self.hincr_by_float(h, key, &field, by),
+            KeyOp::HIncrByFloat(field, by) => self.hincr_by_float(h, key, &field, &by),
             KeyOp::HRandField { count, values } => self.hrandfield(h, key, count, values),
             KeyOp::HExpire { when, cond, fields } => self.hexpire(h, key, when, cond, &fields),
             KeyOp::HTtl {
@@ -406,21 +430,25 @@ impl Shard {
         }
     }
 
-    fn incr_by_float(&mut self, h: u64, key: &[u8], by: f64) -> Reply {
+    fn incr_by_float(&mut self, h: u64, key: &[u8], by: &[u8]) -> Reply {
         self.purge(h, key);
         let current = match self.map.get(h, key) {
-            None => 0.0,
-            Some(Value::Str(v)) => match parse_float(v) {
-                Some(n) => n,
-                None => return Reply::err(NOT_FLOAT),
-            },
+            None => Ok(LongDouble::ZERO),
+            Some(Value::Str(v)) => LongDouble::parse(v),
             Some(_) => return wrongtype(),
         };
-        let next = current + by;
-        if !next.is_finite() {
-            return Reply::err("ERR increment would produce NaN or Infinity");
-        }
-        let text = format_score(next);
+        let next = match (current, LongDouble::parse(by)) {
+            (Err(LongDoubleError::NotFloat), _) | (_, Err(LongDoubleError::NotFloat)) => {
+                return Reply::err(NOT_FLOAT)
+            }
+            (Ok(current), Ok(by)) => current.checked_add(by),
+            // "inf" reads, but no sum may come to it.
+            _ => None,
+        };
+        let Some(next) = next else {
+            return Reply::err(NOT_FINITE);
+        };
+        let text = next.to_human();
         self.put(h, key, Value::Str(text.clone()));
         Reply::Bulk(text)
     }
@@ -455,23 +483,30 @@ impl Shard {
         }
     }
 
-    fn hincr_by_float(&mut self, h: u64, key: &[u8], field: &[u8], by: f64) -> Reply {
+    fn hincr_by_float(&mut self, h: u64, key: &[u8], field: &[u8], by: &[u8]) -> Reply {
+        // Valkey reads the increment before it looks at the key.
+        let by = match LongDouble::parse(by) {
+            Ok(by) => by,
+            Err(LongDoubleError::NotFloat) => return Reply::err(NOT_FLOAT),
+            Err(LongDoubleError::Infinite) => return Reply::err("ERR value is NaN or Infinity"),
+        };
         let fh = hash_bytes(field);
         let current = match self.hash_ref(h, key) {
             Err(wrong_type) => return wrong_type,
             Ok(hash) => match hash.and_then(|hash| hash.get(fh, field)) {
-                None => 0.0,
-                Some(v) => match parse_float(v) {
-                    Some(n) => n,
-                    None => return Reply::err("ERR hash value is not a float"),
-                },
+                None => Ok(LongDouble::ZERO),
+                Some(v) => LongDouble::parse(v),
             },
         };
-        let next = current + by;
-        if !next.is_finite() {
-            return Reply::err("ERR increment would produce NaN or Infinity");
-        }
-        let text = format_score(next);
+        let next = match current {
+            Ok(current) => current.checked_add(by),
+            Err(LongDoubleError::Infinite) => None,
+            Err(LongDoubleError::NotFloat) => return Reply::err("ERR hash value is not a float"),
+        };
+        let Some(next) = next else {
+            return Reply::err(NOT_FINITE);
+        };
+        let text = next.to_human();
         self.hash_edit(h, key, true, Reply::Nil, |hash| {
             hash.insert(fh, field, text.clone());
             (Reply::Bulk(text), true)
@@ -778,7 +813,7 @@ impl Shard {
         };
         match op {
             KeyOp::ZLexCount(min, max) => {
-                let (a, b) = zset.map_or((0, 0), |z| lex_span(z, &min, &max));
+                let (a, b) = zset.map_or((0, 0), |z| lex_span(z, &min, &max, false));
                 Reply::Int((b - a) as i64)
             }
             KeyOp::ZRandMember { count, withscores } => {
@@ -875,7 +910,8 @@ impl Shard {
                 self.zset_edit(h, key, true, Reply::Nil, |z| zadd(z, flags, pairs))
             }
             KeyOp::ZIncrBy(by, member) => self.zset_edit(h, key, true, Reply::Nil, |z| {
-                let next = z.score(&member).unwrap_or(0.0) + by;
+                // A new member takes the increment as it is, -0 included.
+                let next = z.score(&member).map_or(by, |current| current + by);
                 if next.is_nan() {
                     return (Reply::err(NAN_SCORE), false);
                 }
@@ -918,31 +954,42 @@ impl Shard {
     /// PFADD: 1 when the estimate may have changed or the key was created.
     fn pfadd(&mut self, h: u64, key: &[u8], items: &[Bytes]) -> Reply {
         self.purge(h, key);
-        let invalid = |_| Reply::err(super::NOT_HLL);
         match self.map.get_mut(h, key) {
             None => {
                 let mut sketch = hll::new();
                 for item in items {
-                    if let Err(e) = hll::add(&mut sketch, item) {
-                        return invalid(e);
+                    if hll::add(&mut sketch, item).is_err() {
+                        return Reply::err(HLL_CORRUPT);
                     }
                 }
+                hll::invalidate_cache(&mut sketch);
                 self.put(h, key, Value::Str(sketch));
                 Reply::Int(1)
             }
             Some(Value::Str(sketch)) => {
-                if let Err(e) = hll::validate(sketch) {
-                    return invalid(e);
+                if hll::check(sketch).is_err() {
+                    return Reply::err(NOT_HLL);
                 }
                 let mut changed = false;
+                let mut corrupt = false;
                 for item in items {
                     match hll::add(sketch, item) {
                         Ok(grew) => changed |= grew,
-                        Err(e) => return invalid(e),
+                        Err(hll::Corrupt) => {
+                            corrupt = true;
+                            break;
+                        }
                     }
                 }
+                // What changed before a damaged part was found stays, as in
+                // Valkey. Valkey does not pass it on; here it reaches the
+                // replicas like any change, so they stay in step.
                 if changed {
+                    hll::invalidate_cache(sketch);
                     self.touch(h, key);
+                }
+                if corrupt {
+                    return Reply::err(HLL_CORRUPT);
                 }
                 Reply::Int(changed.into())
             }
@@ -950,19 +997,64 @@ impl Shard {
         }
     }
 
-    /// Put a string at `key`, keeping the deadline of a string that is
-    /// there already.
-    pub fn replace_string(&mut self, h: u64, key: &[u8], value: Bytes) {
+    /// PFCOUNT of one key: the cached cardinality, or a new estimate that
+    /// goes into the cache, so the string changes, as in Valkey.
+    pub fn pfcount(&mut self, h: u64, key: &[u8]) -> Reply {
+        if self.live(h, key).is_none() {
+            return Reply::Int(0);
+        }
+        let Some(Value::Str(sketch)) = self.map.get_mut(h, key) else {
+            return wrongtype();
+        };
+        if hll::check(sketch).is_err() {
+            return Reply::err(NOT_HLL);
+        }
+        match hll::count_cached(sketch) {
+            Err(hll::Corrupt) => Reply::err(HLL_CORRUPT),
+            Ok((card, wrote)) => {
+                if wrote {
+                    self.touch(h, key);
+                }
+                Reply::Int(i64::try_from(card).unwrap_or(i64::MAX))
+            }
+        }
+    }
+
+    /// Raises `max` to the HyperLogLog at `key`: `None` when there is no
+    /// key, else whether the sketch is dense.
+    pub fn hll_union(&self, h: u64, key: &[u8], max: &mut [u8]) -> Result<Option<bool>, Reply> {
+        match self.live(h, key) {
+            None => Ok(None),
+            Some(Value::Str(sketch)) => {
+                hll::check(sketch).map_err(|_| Reply::err(NOT_HLL))?;
+                hll::union_into(max, sketch).map_err(|_| Reply::err(HLL_CORRUPT))?;
+                Ok(Some(hll::is_dense(sketch)))
+            }
+            Some(_) => Err(wrongtype()),
+        }
+    }
+
+    /// PFMERGE's write: the registers `max` into `key`, which `hll_union`
+    /// has read already. The deadline of the key stays.
+    pub fn pfmerge_store(&mut self, h: u64, key: &[u8], max: &[u8], dense: bool) -> Reply {
         self.purge(h, key);
-        match self.map.get_mut(h, key) {
-            Some(Value::Str(old)) => {
-                *old = value;
+        let stored = match self.map.get_mut(h, key) {
+            None => {
+                let mut sketch = hll::new();
+                let stored = hll::store_union(&mut sketch, max, dense);
+                self.put(h, key, Value::Str(sketch));
+                stored
+            }
+            Some(Value::Str(sketch)) => {
+                let stored = hll::store_union(sketch, max, dense);
                 self.touch(h, key);
+                stored
             }
-            _ => {
-                self.discard(h, key, Reason::ServerDel);
-                self.put(h, key, Value::Str(value));
-            }
+            Some(_) => return wrongtype(),
+        };
+        match stored {
+            Ok(()) => Reply::Ok,
+            Err(hll::Corrupt) => Reply::err(HLL_CORRUPT),
         }
     }
 
@@ -1215,7 +1307,12 @@ impl Shard {
         if entries.is_empty() {
             return;
         }
+        // Valkey builds the result whole, a listpack if it fits.
         let mut zset = ZSet::default();
+        zset.expect(
+            entries.len(),
+            entries.iter().map(|(m, _)| m.len()).max().unwrap_or(0),
+        );
         for (m, s) in entries {
             zset.insert(m, *s);
         }
@@ -1287,7 +1384,15 @@ fn score_span(z: &ZSet, min: ZBound, max: ZBound) -> (usize, usize) {
     (a, b.max(a))
 }
 
-fn lex_span(z: &ZSet, min: &LexBound, max: &LexBound) -> (usize, usize) {
+/// The ranks of the members from `min` to `max`, as a forward walk finds
+/// them, or one from the top when `rev`. Members are in byte order only
+/// when the scores are all the same; when they are not, Valkey walks a
+/// listpack entry by entry, and so does this. A skiplist promises nothing
+/// there, so a big set is searched.
+fn lex_span(z: &ZSet, min: &LexBound, max: &LexBound, rev: bool) -> (usize, usize) {
+    if z.is_listpack() {
+        return lex_walk(z, min, max, rev);
+    }
     let a = match min {
         LexBound::Min => 0,
         LexBound::Max => z.len(),
@@ -1303,12 +1408,63 @@ fn lex_span(z: &ZSet, min: &LexBound, max: &LexBound) -> (usize, usize) {
     (a, b.max(a))
 }
 
+fn above_min(member: &[u8], min: &LexBound) -> bool {
+    match min {
+        LexBound::Min => true,
+        LexBound::Max => false,
+        LexBound::Incl(m) => member >= m.as_slice(),
+        LexBound::Excl(m) => member > m.as_slice(),
+    }
+}
+
+fn below_max(member: &[u8], max: &LexBound) -> bool {
+    match max {
+        LexBound::Min => false,
+        LexBound::Max => true,
+        LexBound::Incl(m) => member <= m.as_slice(),
+        LexBound::Excl(m) => member < m.as_slice(),
+    }
+}
+
+/// Valkey's walk of a listpack: nothing unless the last entry is at or
+/// above `min` and the first at or below `max`; then from the first entry
+/// at or above `min` on while at or below `max`, or in reverse from the
+/// last entry at or below `max` down while at or above `min`.
+fn lex_walk(z: &ZSet, min: &LexBound, max: &LexBound, rev: bool) -> (usize, usize) {
+    let members: Vec<&[u8]> = z.range(0, z.len()).map(|(m, _)| m).collect();
+    let (Some(first), Some(last)) = (members.first(), members.last()) else {
+        return (0, 0);
+    };
+    if !above_min(last, min) || !below_max(first, max) {
+        return (0, 0);
+    }
+    if rev {
+        let Some(end) = members.iter().rposition(|m| below_max(m, max)) else {
+            return (0, 0);
+        };
+        let start = members[..=end]
+            .iter()
+            .rposition(|m| !above_min(m, min))
+            .map_or(0, |i| i + 1);
+        (start, end + 1)
+    } else {
+        let Some(start) = members.iter().position(|m| above_min(m, min)) else {
+            return (0, 0);
+        };
+        let end = members[start..]
+            .iter()
+            .position(|m| !below_max(m, max))
+            .map_or(members.len(), |i| start + i);
+        (start, end)
+    }
+}
+
 /// The ranks `by` selects, lowest first.
 fn zspan(z: &ZSet, by: &ZBy) -> (usize, usize) {
     match by {
         ZBy::Rank(start, stop) => span(*start, *stop, z.len()).unwrap_or((0, 0)),
         ZBy::Score(min, max) => score_span(z, *min, *max),
-        ZBy::Lex(min, max) => lex_span(z, min, max),
+        ZBy::Lex(min, max) => lex_span(z, min, max, false),
     }
 }
 
@@ -1322,9 +1478,6 @@ fn bit_at(v: &[u8], offset: usize) -> bool {
 fn bit_span(len: usize, start: i64, end: i64, bits: bool) -> Option<(usize, usize)> {
     let unit = if bits { 1 } else { 8 };
     let total = (len * 8 / unit) as i64;
-    if start < 0 && end < 0 && start > end {
-        return None;
-    }
     // Unlike list ranges, an end before the first position means the first.
     let clamp = |i: i64| {
         if i < 0 {
@@ -1340,6 +1493,9 @@ fn bit_span(len: usize, start: i64, end: i64, bits: bool) -> Option<(usize, usiz
 fn bit_count(v: &[u8], range: Option<(i64, i64, bool)>) -> usize {
     let (a, b) = match range {
         None => (0, v.len() * 8),
+        // Two negative positions the wrong way round count nothing, even
+        // when both would clamp to the first byte; BITPOS has no such rule.
+        Some((start, end, _)) if start < 0 && end < 0 && start > end => return 0,
         Some((start, end, bits)) => match bit_span(v.len(), start, end, bits) {
             Some(range) => range,
             None => return 0,
@@ -1389,6 +1545,7 @@ fn zrange<'a>(z: &'a ZSet, spec: &ZRangeSpec) -> Vec<(&'a [u8], f64)> {
             Some((a, b)) => (len - b, len - a),
             None => (0, 0),
         },
+        ZBy::Lex(min, max) => lex_span(z, min, max, spec.rev),
         by => zspan(z, by),
     };
     if let Some((offset, count)) = spec.limit {
@@ -1409,6 +1566,8 @@ fn zrange<'a>(z: &'a ZSet, spec: &ZRangeSpec) -> Vec<(&'a [u8], f64)> {
 }
 
 fn zadd(z: &mut ZSet, flags: ZAddFlags, pairs: Vec<(f64, Bytes)>) -> (Reply, bool) {
+    let longest = pairs.iter().map(|(_, m)| m.len()).max().unwrap_or(0);
+    z.expect(pairs.len(), longest);
     let (mut added, mut updated) = (0, 0);
     let mut last = None;
     for (given, member) in pairs {

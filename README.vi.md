@@ -516,7 +516,18 @@ Dòng "Bỏ `read` thừa" đo xen kẽ 10 vòng khi máy Windows bên ngoài đ
 | 2 nhân | 1,278 → 1,403 → 1,525 / 1,665 | 1,210 → 1,436 → 1,437 / 1,561 |
 | 4 nhân | 1,258 → 1,631 → 1,902 / 2,094 | 1,145 → 1,524 → 1,604 / 1,826 |
 
-PGO (tối ưu theo profile chạy thật): `bench/pgo_build.sh` build bản có đo đếm, chạy `hload` qua các kiểu tải (GET/SET có và không pipeline, ghi 100%, SCAN, hashtag, EVAL, MULTI, khóa thay liên tục), rồi build lại theo profile. Lần thử đầu (trước đợt hai) chỉ thêm 1 đến 2%. Trên bản cuối, PGO thêm 5 đến 8% ở 1 nhân và 9 đến 14% ở 2 và 4 nhân, giảm chu kỳ mỗi lệnh từ 3 026 xuống 2 428 và trượt iTLB từ 13,9 xuống 9,2. Chưa nằm trong `Dockerfile`.
+PGO (tối ưu theo profile chạy thật): `bench/pgo_build.sh` build bản có đo đếm, chạy `hload` qua các kiểu tải (GET/SET có và không pipeline, ghi 100%, SCAN, hashtag, EVAL, MULTI, khóa thay liên tục), rồi build lại theo profile. Lần thử đầu (trước đợt hai) chỉ thêm 1 đến 2%. Trên bản cuối, PGO thêm 5 đến 8% ở 1 nhân và 9 đến 14% ở 2 và 4 nhân, giảm chu kỳ mỗi lệnh từ 3 026 xuống 2 428 và trượt iTLB từ 13,9 xuống 9,2. `Dockerfile` build có PGO; `--build-arg PGO=0` cho bản build thường.
+
+**So cả với Redis.** Ngày 2026-11-17, Redis 8.10.2 và Valkey 9.1.3 build từ mã nguồn, cùng thiết lập như trên (pipeline 16, 64 kết nối, 10% ghi, giá trị 64 byte), máy chủ ghim nhân bằng `taskset`, `--io-threads` hoặc `--workers` bằng số nhân, không ghi đĩa, các vòng xen kẽ bằng `bench/ab_cores.sh` (6 vòng ở 1 nhân, 5 vòng ở 4 nhân; số liệu thô ở `bench/results/2026-11-17-wsl2-redis.txt`). Tỉ lệ so với Valkey 9.1.3:
+
+| Máy chủ | 1 nhân, 100 000 khóa | 1 nhân, 1 000 000 khóa | 4 nhân, 100 000 khóa | 4 nhân, 1 000 000 khóa |
+|---|---|---|---|---|
+| Valkey 9.1.3 | 1,000 | 1,000 | 1,000 | 1,000 |
+| Redis 8.10.2 | 1,029 | 0,997 | 0,997 | 0,915 |
+| HCache, build thường | 0,955 | 0,902 | 1,575 | 1,399 |
+| HCache, build PGO | 1,066 | 1,013 | 1,854 | 1,769 |
+
+Ở 1 nhân Valkey 9.1.3 đạt 625 377 lệnh/giây với 100 000 khóa; ở 4 nhân, 2 026 378. Redis cách Valkey không quá 3%, trừ ở 4 nhân với 1 000 000 khóa. HCache chạy lệnh trên mọi worker, còn Redis và Valkey chạy lệnh trên một luồng chính và dùng các luồng còn lại cho I/O; đó có lẽ là lý do của khoảng cách ở 4 nhân. Độ lệch chuẩn dưới 3% giá trị trung bình, trừ HCache PGO ở 4 nhân, 100 000 khóa (11%). Cùng máy và cùng giới hạn như trên: máy phát tải dùng chung 8 vCPU.
 
 ## Giới hạn đã biết
 
@@ -535,7 +546,7 @@ PGO (tối ưu theo profile chạy thật): `bench/pgo_build.sh` build bản có
   - Tệp dữ liệu có thêm bốn loại bản ghi (thư viện hàm, người dùng); bản HCache cũ hơn không đọc được tệp có các bản ghi này.
 - **Nhóm P1, chỗ khác Redis:**
   - Thời hạn của field: `KEYS`, `SCAN`, `DBSIZE`, `RANDOMKEY` có thể còn thấy một hash mà mọi field đã hết hạn, cho đến khi có lệnh chạm vào nó hoặc lượt quét dọn tới.
-  - HyperLogLog luôn lưu ở dạng dày (12 KiB mỗi khóa); dạng thưa của Redis đọc được và được đổi sang dạng dày khi ghi. Chưa có `PFDEBUG`, `PFSELFTEST`.
+  - HyperLogLog lưu giống Valkey 9.1 từng byte: dạng thưa cho tới khi một thanh ghi vượt 32 hoặc chuỗi vượt 3000 byte, kèm số đếm mà `PFCOUNT` ghi đệm. Chưa có `PFDEBUG`, `PFSELFTEST`.
   - `DUMP` ghi RDB phiên bản 8 và `RESTORE` nhận phiên bản tới 12, cho chuỗi, list, set, sorted set, hash. Stream và hash có thời hạn field dùng định dạng riêng của HCache (kiểu `0xE0`, `0xE1`), Redis không đọc được; payload stream của Redis bị từ chối. `IDLETIME` và `FREQ` được nhận rồi bỏ qua. Mã giải mã viết theo tài liệu và trí nhớ về mã Redis, mới kiểm bằng hai vector trong tài liệu Redis, chưa đối chiếu với Redis thật.
   - Thông báo keyspace: không phát cho `FLUSHALL`/`FLUSHDB`, cho khóa đích của `COPY ... DB n`, và không có các lớp `n` (khóa mới), `m` (đọc trượt), `d`. Bản nhúng không có listener thì không phát gì. Mỗi shard giữ một số có hạn sự kiện hết hạn chờ phát; vượt quá thì bỏ bớt.
   - `FUNCTION`: thư viện được lưu trong tệp dữ liệu khi có `--data` và được nạp lại lúc khởi động (một thư viện không nạp lại được thì server không khởi động); không có `FUNCTION DUMP`/`RESTORE`; tối đa 1000 thư viện, mỗi thư viện 1 MiB mã. Khi trạng thái Lua bị dựng lại (sau lỗi hết bộ nhớ), thư viện được chạy lại từ mã nguồn; nếu lần chạy lại đăng ký tập hàm khác lần đầu thì `FCALL` báo lỗi.

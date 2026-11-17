@@ -70,6 +70,8 @@ impl Value {
 
 pub const WRONGTYPE: &str = "WRONGTYPE Operation against a key holding the wrong kind of value";
 pub const NOT_HLL: &str = "WRONGTYPE Key is not a valid HyperLogLog string value.";
+/// A sparse HyperLogLog whose opcodes do not add up.
+pub const HLL_CORRUPT: &str = "INVALIDOBJ Corrupted HLL object detected";
 const OVERFLOW: &str = "ERR increment or decrement would overflow";
 /// Longest string value, as in Redis (`proto-max-bulk-len`).
 pub(crate) const MAX_STRING: usize = 512 << 20;

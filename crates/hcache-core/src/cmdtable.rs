@@ -108,11 +108,11 @@ const MOD_W: &[&str] = &["write", "denyoom", "module"];
 const MOD_RO_FAST: &[&str] = &["readonly", "module", "fast"];
 const MOD_W_FAST_ANY: &[&str] = &["write", "module", "fast"];
 const MOD_RO_MOVABLE: &[&str] = &["readonly", "module", "movablekeys"];
+// Valkey keeps `may_replicate` out of COMMAND's flags.
 const EVAL: &[&str] = &[
     "noscript",
     "stale",
     "skip_monitor",
-    "may_replicate",
     "no_mandatory_keys",
     "movablekeys",
 ];
@@ -438,7 +438,7 @@ static TABLE: &[CmdInfo] = &[
     e("psync", -3, REPL_SYNC, 0, 0, 0, ADMIN, "server",
         "Take the replication stream from an offset, or the whole dataset."),
     e("pttl", 2, RO_FAST, 1, 1, 1, KS_R_FAST, "generic", "Get a key's time to live in ms."),
-    e("publish", 3, &["pubsub", "loading", "stale", "fast", "may_replicate"], 0, 0, 0,
+    e("publish", 3, &["pubsub", "loading", "stale", "fast"], 0, 0, 0,
         &["pubsub", "fast"], "pubsub", "Send a message to a channel."),
     c("pubsub", -2, &["pubsub", "loading", "stale"], PUBSUB_SLOW, "pubsub",
         "Inspect channels and subscriptions.",
@@ -499,7 +499,7 @@ static TABLE: &[CmdInfo] = &[
     e("sort_ro", -2, RO_MOVABLE, 1, 1, 1, &["read", "set", "sortedset", "list", "slow", "dangerous"],
         "generic", "Sort the elements of a list, set or sorted set, read-only."),
     e("spop", -2, W_FAST, 1, 1, 1, SET_W_FAST, "set", "Pop random members of a set."),
-    e("spublish", 3, &["pubsub", "loading", "stale", "fast", "may_replicate"], 0, 0, 0,
+    e("spublish", 3, &["pubsub", "loading", "stale", "fast"], 0, 0, 0,
         &["pubsub", "fast"], "pubsub", "Send a message to a shard channel."),
     e("srandmember", -2, RO, 1, 1, 1, SET_R_SLOW, "set", "Pick random members of a set."),
     e("srem", -3, W_FAST, 1, 1, 1, SET_W_FAST, "set", "Remove members from a set."),

@@ -11,6 +11,8 @@ pub mod cmd;
 pub mod cmdtable;
 pub mod dict;
 pub mod engine;
+pub mod float;
+mod fpconv;
 pub mod gate;
 pub mod geo;
 pub mod glob;

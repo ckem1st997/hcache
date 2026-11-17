@@ -808,12 +808,12 @@ impl Cmd {
             .first()
             .ok_or_else(|| Reply::err("ERR empty command"))?;
         if raw.len() > name_buf.len() {
-            return Err(unknown(raw));
+            return Err(unknown(&args));
         }
         let name = &mut name_buf[..raw.len()];
         name.copy_from_slice(raw);
         name.make_ascii_uppercase();
-        let name = std::str::from_utf8(name).map_err(|_| unknown(raw))?;
+        let name = std::str::from_utf8(name).map_err(|_| unknown(&args))?;
         if let Some(fits) = ops::probe(name, args.len()) {
             return if fits {
                 ops::parse_known(name, &mut args)
@@ -1248,7 +1248,7 @@ impl Cmd {
             | "MONITOR" | "SLOWLOG" | "LATENCY" | "WAIT" | "WAITAOF" | "CLUSTER" | "ASKING"
             | "READONLY" | "READWRITE" | "ROLE" | "COMMANDLOG" | "DEBUG" | "PSYNC" | "SYNC"
             | "REPLICAOF" | "SLAVEOF" => return Err(arity(name)),
-            _ => return Err(unknown(name.as_bytes())),
+            _ => return Err(unknown(&args)),
         };
         Ok(cmd)
     }
@@ -1383,26 +1383,13 @@ impl Cmd {
     /// Whether running this may change what the data file has to hold:
     /// keys, libraries of functions, users. A script may, whatever it does.
     /// The command as a replica runs it for its clients: a write is
-    /// refused, and a script may only read.
+    /// refused, and a function may only read. A script stays as it came:
+    /// as in Valkey, its writes are refused as they come, while PFCOUNT
+    /// and PUBLISH, refused to EVAL_RO, still run.
     pub fn on_replica(self) -> Result<Cmd, Reply> {
         match self {
             Cmd::In(db, cmd) => cmd.on_replica().map(|cmd| Cmd::In(db, Box::new(cmd))),
-            Cmd::Eval {
-                script, keys, args, ..
-            } => Ok(Cmd::Eval {
-                script,
-                keys,
-                args,
-                read_only: true,
-            }),
-            Cmd::EvalSha {
-                sha, keys, args, ..
-            } => Ok(Cmd::EvalSha {
-                sha,
-                keys,
-                args,
-                read_only: true,
-            }),
+            cmd @ (Cmd::Eval { .. } | Cmd::EvalSha { .. }) => Ok(cmd),
             Cmd::FCall {
                 name, keys, args, ..
             } => Ok(Cmd::FCall {
@@ -1433,6 +1420,8 @@ impl Cmd {
         match self {
             Cmd::In(_, cmd) => cmd.pausable(),
             Cmd::Publish(..) | Cmd::SPublish(..) => true,
+            // It may write the cache in its key.
+            Cmd::Multi(op) if matches!(**op, MultiOp::PfCount(_)) => true,
             Cmd::Eval { read_only, .. }
             | Cmd::EvalSha { read_only, .. }
             | Cmd::FCall { read_only, .. } => !read_only,
@@ -1826,8 +1815,34 @@ fn parse_hello(args: &[Bytes]) -> Result<(Option<u8>, Option<(Bytes, Bytes)>), R
     Ok((Some(proto), auth))
 }
 
-fn unknown(name: &[u8]) -> Reply {
-    const SHOWN: usize = 64;
-    let shown = String::from_utf8_lossy(&name[..name.len().min(SHOWN)]);
-    Reply::Error(format!("ERR unknown command '{shown}'"))
+/// Valkey's wording: the name and then the arguments, each cut to fit 128
+/// bytes, and line breaks turned into spaces so the reply stays one line.
+fn unknown(args: &[Bytes]) -> Reply {
+    const SHOWN: usize = 128;
+    // Valkey formats with %s, which stops at a zero byte.
+    fn c_str(b: &[u8]) -> &[u8] {
+        b.split(|&c| c == 0).next().unwrap_or(b)
+    }
+    let name = args.first().map_or(&[][..], |n| c_str(n));
+    let mut text = b"ERR unknown command '".to_vec();
+    text.extend_from_slice(&name[..name.len().min(SHOWN)]);
+    text.extend_from_slice(b"', with args beginning with: ");
+    let mut listed = 0;
+    for arg in args.iter().skip(1) {
+        if listed >= SHOWN {
+            break;
+        }
+        let arg = c_str(arg);
+        let take = arg.len().min(SHOWN - listed);
+        text.push(b'\'');
+        text.extend_from_slice(&arg[..take]);
+        text.extend_from_slice(b"' ");
+        listed += take + 3;
+    }
+    for b in &mut text {
+        if *b == b'\r' || *b == b'\n' {
+            *b = b' ';
+        }
+    }
+    Reply::Error(String::from_utf8_lossy(&text).into_owned())
 }

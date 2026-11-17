@@ -570,6 +570,15 @@ fn redis_call(engine: &Engine, state: &AtomicU8, args: MultiValue) -> mlua::Resu
             return Ok(denied);
         }
     }
+    // Valkey counts what may replicate as a write here: PUBLISH, and
+    // PFCOUNT, which can rewrite the cache in its key.
+    let may_replicate = matches!(cmd, Cmd::Publish(..) | Cmd::SPublish(..))
+        || matches!(&cmd, Cmd::Multi(op) if matches!(**op, crate::ops::MultiOp::PfCount(_)));
+    if may_replicate && engine.scripts.read_only.load(SeqCst) {
+        return Ok(Reply::err(
+            "ERR Write commands are not allowed from read-only scripts.",
+        ));
+    }
     if matches!(
         cmd,
         Cmd::Ping(_) | Cmd::Echo(_) | Cmd::Dbsize | Cmd::Publish(..) | Cmd::SPublish(..)
@@ -588,6 +597,9 @@ fn redis_call(engine: &Engine, state: &AtomicU8, args: MultiValue) -> mlua::Resu
             return Ok(Reply::err(
                 "ERR Write commands are not allowed from read-only scripts.",
             ));
+        }
+        if engine.is_replica() {
+            return Ok(Reply::err(crate::cmd::READONLY));
         }
         // From here on the script cannot be killed; if the kill came first,
         // the write must not happen.

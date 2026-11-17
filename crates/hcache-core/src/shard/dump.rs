@@ -178,7 +178,12 @@ fn plain_value(plain: Plain) -> Option<Value> {
             Value::Set(Box::new(set))
         }
         Plain::ZSet(entries) => {
+            // Valkey loads a sorted set whole: a listpack if it fits.
             let mut zset = ZSet::default();
+            zset.expect(
+                entries.len(),
+                entries.iter().map(|(m, _)| m.len()).max().unwrap_or(0),
+            );
             for (member, score) in &entries {
                 if score.is_nan() || zset.insert(member, *score).is_some() {
                     return None;

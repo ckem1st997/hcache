@@ -7,9 +7,10 @@
 //! and the parsers of the commands' arguments.
 
 use crate::cmd::{syntax, NOT_INT};
+use crate::float::LongDouble;
 use crate::ops::NOT_FLOAT;
 use crate::resp::{parse_i64, Reply};
-use crate::zset::{format_score, parse_float};
+use crate::zset::parse_float;
 
 pub const LON_MIN: f64 = -180.0;
 pub const LON_MAX: f64 = 180.0;
@@ -485,13 +486,12 @@ pub fn dist_text(metres: f64, unit: Unit) -> Vec<u8> {
     format!("{:.4}", metres / unit.metres()).into_bytes()
 }
 
-/// A decoded position as a reply: longitude, then latitude.
+/// A decoded position as a reply: longitude, then latitude, each with the
+/// seventeen decimals of Valkey's addReplyHumanLongDouble.
 pub fn position_reply(bits: u64) -> Reply {
     let (lon, lat) = decode(bits);
-    Reply::Array(vec![
-        Reply::Bulk(format_score(lon)),
-        Reply::Bulk(format_score(lat)),
-    ])
+    let human = |x: f64| Reply::Bulk(LongDouble::from_f64(x).to_human());
+    Reply::Array(vec![human(lon), human(lat)])
 }
 
 impl Query {

@@ -5,6 +5,7 @@
 use crate::bitfield;
 use crate::bloom::{self, BfCmd, Settings};
 use crate::cmd::{arity, parse_cond, parse_when, syntax, Bytes, Cmd, Cond, Expire, NOT_INT};
+use crate::float::parse_bound;
 use crate::geo::{self, GeoOp};
 use crate::json::{self, JsonCmd};
 use crate::resp::{parse_i64, Reply, Shape};
@@ -119,13 +120,16 @@ pub enum KeyOp {
     Bloom(Box<BfCmd>),
     /// A JSON.* command on one key.
     Json(Box<JsonCmd>),
-    IncrByFloat(f64),
+    /// The increment as given, read only once the key's value has been.
+    IncrByFloat(Bytes),
     GetRange(i64, i64),
     SetRange(usize, Bytes),
     HKeys,
     HVals,
     HStrlen(Bytes),
-    HIncrByFloat(Bytes, f64),
+    /// The field and the increment as given: Valkey reads the increment
+    /// when the command runs, so inside MULTI a bad one still queues.
+    HIncrByFloat(Bytes, Bytes),
     HRandField {
         count: Option<i64>,
         values: bool,
@@ -436,6 +440,9 @@ pub enum MultiOp {
         withscores: bool,
         /// ZINTERCARD: reply with the size, counting no further than this.
         card: Option<usize>,
+        /// A bad option, which Valkey reports only once every key has
+        /// passed its type check.
+        bad_option: Option<Reply>,
     },
     ZRangeStore {
         dst: Bytes,
@@ -675,7 +682,8 @@ fn zbound(raw: &[u8]) -> Result<ZBound, Reply> {
         Some(rest) => (true, rest),
         None => (false, raw),
     };
-    let value = parse_float(digits).ok_or_else(|| Reply::err("ERR min or max is not a float"))?;
+    // Valkey 9.1 reads an empty bound, or a bare "(", as zero.
+    let value = parse_bound(digits).ok_or_else(|| Reply::err("ERR min or max is not a float"))?;
     Ok(ZBound { value, exclusive })
 }
 
@@ -958,7 +966,8 @@ pub(crate) fn parse_known(name: &str, args: &mut Vec<Bytes>) -> Result<Cmd, Repl
         });
     }
     let op = match name {
-        "INCRBYFLOAT" => KeyOp::IncrByFloat(float(&args[2])?),
+        // Valkey checks the key's type and value before the increment.
+        "INCRBYFLOAT" => KeyOp::IncrByFloat(take(args, 2)),
         "GETRANGE" | "SUBSTR" => KeyOp::GetRange(int(&args[2])?, int(&args[3])?),
         "SETRANGE" => {
             let offset = usize::try_from(int(&args[2])?)
@@ -968,10 +977,7 @@ pub(crate) fn parse_known(name: &str, args: &mut Vec<Bytes>) -> Result<Cmd, Repl
         "HKEYS" => KeyOp::HKeys,
         "HVALS" => KeyOp::HVals,
         "HSTRLEN" => KeyOp::HStrlen(take(args, 2)),
-        "HINCRBYFLOAT" => {
-            let by = float(&args[3])?;
-            KeyOp::HIncrByFloat(take(args, 2), by)
-        }
+        "HINCRBYFLOAT" => KeyOp::HIncrByFloat(take(args, 2), take(args, 3)),
         "HEXPIRE" | "HPEXPIRE" | "HEXPIREAT" | "HPEXPIREAT" => {
             if int(&args[2])? < 0 {
                 return Err(Reply::err("ERR invalid expire time, must be >= 0"));
@@ -1844,30 +1850,10 @@ fn parse_multi(name: &str, args: &mut Vec<Bytes>) -> Result<MultiOp, Reply> {
                 keys,
             }
         }
-        "ZINTERCARD" => {
-            let numkeys = numkeys(args, 1)?;
-            let card = match &args[2 + numkeys..] {
-                [] => usize::MAX,
-                [option, raw] if is(option, "LIMIT") => match int(raw)? {
-                    0 => usize::MAX,
-                    limit => usize::try_from(limit)
-                        .map_err(|_| Reply::err("ERR LIMIT can't be negative"))?,
-                },
-                _ => return Err(syntax()),
-            };
-            args.truncate(2 + numkeys);
-            MultiOp::ZStore {
-                dst: None,
-                weights: vec![1.0; numkeys],
-                keys: args.split_off(2),
-                aggregate: Aggregate::Sum,
-                op: SetOp::Inter,
-                withscores: false,
-                card: Some(card),
-            }
-        }
-        "ZUNIONSTORE" | "ZINTERSTORE" | "ZDIFFSTORE" | "ZUNION" | "ZINTER" | "ZDIFF" => {
+        "ZUNIONSTORE" | "ZINTERSTORE" | "ZDIFFSTORE" | "ZUNION" | "ZINTER" | "ZDIFF"
+        | "ZINTERCARD" => {
             let store = name.ends_with("STORE");
+            let card_only = name == "ZINTERCARD";
             // Where `numkeys` is.
             let at = if store { 2 } else { 1 };
             let op = match &name[..4] {
@@ -1890,31 +1876,41 @@ fn parse_multi(name: &str, args: &mut Vec<Bytes>) -> Result<MultiOp, Reply> {
             let mut weights = vec![1.0; numkeys];
             let mut aggregate = Aggregate::Sum;
             let mut withscores = false;
+            let mut card = card_only.then_some(usize::MAX);
             let mut rest = &args[at + 1 + numkeys..];
-            while let Some(option) = rest.first() {
-                if is(option, "WITHSCORES") && !store {
-                    withscores = true;
-                    rest = &rest[1..];
-                } else if op == SetOp::Diff {
-                    return Err(syntax());
-                } else if is(option, "WEIGHTS") && rest.len() > numkeys {
-                    for (w, raw) in weights.iter_mut().zip(&rest[1..]) {
-                        *w = parse_float(raw)
-                            .ok_or_else(|| Reply::err("ERR weight value is not a float"))?;
+            let mut options = || -> Result<(), Reply> {
+                while let Some(option) = rest.first() {
+                    let combines = op != SetOp::Diff && !card_only;
+                    if combines && is(option, "WEIGHTS") && rest.len() > numkeys {
+                        for (w, raw) in weights.iter_mut().zip(&rest[1..]) {
+                            *w = parse_float(raw)
+                                .ok_or_else(|| Reply::err("ERR weight value is not a float"))?;
+                        }
+                        rest = &rest[1 + numkeys..];
+                    } else if combines && is(option, "AGGREGATE") && rest.len() >= 2 {
+                        aggregate = match rest[1].to_ascii_uppercase().as_slice() {
+                            b"SUM" => Aggregate::Sum,
+                            b"MIN" => Aggregate::Min,
+                            b"MAX" => Aggregate::Max,
+                            _ => return Err(syntax()),
+                        };
+                        rest = &rest[2..];
+                    } else if is(option, "WITHSCORES") && !store && !card_only {
+                        withscores = true;
+                        rest = &rest[1..];
+                    } else if card_only && is(option, "LIMIT") && rest.len() >= 2 {
+                        let limit = parse_i64(&rest[1])
+                            .and_then(|limit| usize::try_from(limit).ok())
+                            .ok_or_else(|| Reply::err("ERR LIMIT can't be negative"))?;
+                        card = Some(if limit == 0 { usize::MAX } else { limit });
+                        rest = &rest[2..];
+                    } else {
+                        return Err(syntax());
                     }
-                    rest = &rest[1 + numkeys..];
-                } else if is(option, "AGGREGATE") && rest.len() >= 2 {
-                    aggregate = match rest[1].to_ascii_uppercase().as_slice() {
-                        b"SUM" => Aggregate::Sum,
-                        b"MIN" => Aggregate::Min,
-                        b"MAX" => Aggregate::Max,
-                        _ => return Err(syntax()),
-                    };
-                    rest = &rest[2..];
-                } else {
-                    return Err(syntax());
                 }
-            }
+                Ok(())
+            };
+            let bad_option = options().err();
             args.truncate(at + 1 + numkeys);
             let keys = args.split_off(at + 1);
             MultiOp::ZStore {
@@ -1924,7 +1920,8 @@ fn parse_multi(name: &str, args: &mut Vec<Bytes>) -> Result<MultiOp, Reply> {
                 aggregate,
                 op,
                 withscores,
-                card: None,
+                card,
+                bad_option,
             }
         }
         _ => return Err(Reply::err("ERR internal: unparsed command")),

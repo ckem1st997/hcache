@@ -9,6 +9,9 @@
 mod support;
 
 use hcache::{Config, Db, Reply, Session};
+// Valkey adds INCRBYFLOAT increments as long doubles; the core's own type,
+// pinned to Valkey's output by its unit tests, stands in for them here.
+use hcache_core::float::{LongDouble, LongDoubleError};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering as AtomicOrd};
 use std::sync::Arc;
@@ -213,14 +216,10 @@ fn rbulks<'a>(items: impl IntoIterator<Item = &'a B>) -> Rep {
     Rep::Arr(items.into_iter().map(|i| rb(i)).collect())
 }
 
+/// A score as Valkey prints it. The rules (integers up to 2^62, Grisu2
+/// past that) are pinned to Valkey's output by the core's unit tests.
 fn fscore(s: f64) -> B {
-    if s == f64::INFINITY {
-        b("inf")
-    } else if s == f64::NEG_INFINITY {
-        b("-inf")
-    } else {
-        format!("{s}").into_bytes()
-    }
+    hcache_core::zset::format_score(s)
 }
 
 fn pfloat(s: &str) -> Option<f64> {
@@ -262,9 +261,13 @@ fn pbound(s: &str) -> Result<Bound, Rep> {
         Some(rest) => (true, rest),
         None => (false, s),
     };
-    pfloat(digits)
-        .map(|v| (v, excl))
-        .ok_or_else(|| rerr(BAD_BOUND))
+    // Valkey 9.1 reads an empty bound as zero.
+    let value = if digits.is_empty() {
+        Some(0.0)
+    } else {
+        pfloat(digits)
+    };
+    value.map(|v| (v, excl)).ok_or_else(|| rerr(BAD_BOUND))
 }
 
 fn in_range(score: f64, lo: Bound, hi: Bound) -> bool {
@@ -720,20 +723,20 @@ impl Model {
                 }) => Out::Pttl(d - now),
             },
             "INCRBYFLOAT" => {
-                let by = pf(&a[2])?;
+                // The key's type and value are checked before the increment.
                 let cur = match self.peek(key, Kind::Str)? {
-                    None => 0.0,
-                    Some(V::Str(s)) => std::str::from_utf8(s)
-                        .ok()
-                        .and_then(pfloat)
-                        .ok_or_else(|| rerr(NOT_FLOAT))?,
+                    None => Ok(LongDouble::ZERO),
+                    Some(V::Str(s)) => LongDouble::parse(s),
                     Some(_) => unreachable!(),
                 };
-                let next = cur + by;
-                if !next.is_finite() {
-                    return Err(rerr(NAN_OR_INF));
-                }
-                let text = fscore(next);
+                let next = match (cur, LongDouble::parse(a[2].as_bytes())) {
+                    (Err(LongDoubleError::NotFloat), _) | (_, Err(LongDoubleError::NotFloat)) => {
+                        return Err(rerr(NOT_FLOAT))
+                    }
+                    (Ok(cur), Ok(by)) => cur.checked_add(by),
+                    _ => None,
+                };
+                let text = next.ok_or_else(|| rerr(NAN_OR_INF))?.to_human();
                 let deadline = self.keys.get(key).and_then(|e| e.deadline);
                 let val = V::Str(text.clone());
                 self.keys.insert(key.into(), Entry { val, deadline });
@@ -744,17 +747,18 @@ impl Model {
                 match self.peek(key, Kind::Str)? {
                     Some(V::Str(v)) => {
                         let len = v.len() as i64;
-                        // Redis 7 answers a fully out-of-range negative end
-                        // with the first byte; documented behaviour is vague.
-                        if e < 0 && len + e < 0 {
-                            return Ok(Out::Skip);
-                        }
-                        if s < 0 && e < 0 && s > e {
+                        // Valkey's t_string.c: an end before the first byte
+                        // is clamped to it, unlike LRANGE.
+                        if len == 0 || (s < 0 && e < 0 && s > e) {
                             return Ok(E(rb(b"")));
                         }
                         let s = if s < 0 { (s + len).max(0) } else { s };
-                        let e = if e < 0 { e + len } else { e.min(len - 1) };
-                        if s > e || len == 0 {
+                        let e = if e < 0 {
+                            (e + len).max(0)
+                        } else {
+                            e.min(len - 1)
+                        };
+                        if s > e {
                             E(rb(b""))
                         } else {
                             E(rb(&v[s as usize..=e as usize]))
@@ -905,22 +909,32 @@ impl Model {
                 _ => E(Rep::Int(0)),
             },
             "HINCRBYFLOAT" => {
-                let by = pf(&a[3])?;
+                // The increment is checked before the key's type.
+                let by = match LongDouble::parse(a[3].as_bytes()) {
+                    Ok(by) => by,
+                    Err(LongDoubleError::NotFloat) => return Err(rerr(NOT_FLOAT)),
+                    Err(LongDoubleError::Infinite) => {
+                        return Err(rerr("ERR value is NaN or Infinity"))
+                    }
+                };
                 let field = b(&a[2]);
                 E(self.edit(key, Kind::Hash, true, Rep::Nil, |v| {
                     let h = v.hash();
                     let cur = match h.get(&field) {
-                        None => 0.0,
-                        Some(old) => match std::str::from_utf8(old).ok().and_then(pfloat) {
-                            Some(n) => n,
-                            None => return rerr("ERR hash value is not a float"),
-                        },
+                        None => Ok(LongDouble::ZERO),
+                        Some(old) => LongDouble::parse(old),
                     };
-                    let next = cur + by;
-                    if !next.is_finite() {
+                    let next = match cur {
+                        Ok(cur) => cur.checked_add(by),
+                        Err(LongDoubleError::Infinite) => None,
+                        Err(LongDoubleError::NotFloat) => {
+                            return rerr("ERR hash value is not a float")
+                        }
+                    };
+                    let Some(next) = next else {
                         return rerr(NAN_OR_INF);
-                    }
-                    let text = fscore(next);
+                    };
+                    let text = next.to_human();
                     h.insert(field, text.clone());
                     Rep::Bulk(text)
                 })?)
@@ -1343,7 +1357,7 @@ impl Model {
                 let m = b(&a[3]);
                 E(self.edit(key, Kind::Z, true, Rep::Nil, |v| {
                     let z = v.zs();
-                    let next = zfind(z, &m).unwrap_or(0.0) + by;
+                    let next = zfind(z, &m).map_or(by, |cur| cur + by);
                     if next.is_nan() {
                         return rerr(NAN_SCORE);
                     }
@@ -3021,7 +3035,8 @@ fn zset_range_edge_cases() {
                 ("ZRANGEBYSCORE zr 2 4 LIMIT 1", "-ERR syntax error"),
                 ("ZRANGEBYSCORE zr 2 4 LIMIT x 1", "-ERR value is not an integer or out of range"),
                 ("ZRANGEBYSCORE zr a 4", "-ERR min or max is not a float"),
-                ("ZRANGEBYSCORE zr ( 4", "-ERR min or max is not a float"),
+                // Valkey 9.1 reads a bare "(" as an exclusive zero.
+                ("ZRANGEBYSCORE zr ( 4", "[a b c d]"),
                 ("ZRANGEBYSCORE zr 2 4 BOGUS", "-ERR syntax error"),
                 (
                     "ZRANGE zr 0 -1 LIMIT 0 1",
@@ -3169,6 +3184,56 @@ fn zset_store_edge_cases() {
     });
 }
 
+/// Captured from Valkey 9.1.3. A set of up to 128 members, none over 64
+/// bytes, is a listpack there: -0 is stored as 0, and a member range is
+/// found by walking the entries, which differs from a search when the
+/// scores differ.
+#[test]
+fn small_sorted_sets_answer_as_valkey_listpacks() {
+    guarded("zset-listpack", 60, || {
+        let (_db, s) = fresh();
+        let long = "m".repeat(65);
+        table(
+            &s,
+            &[
+                ("ZADD z -0 a", ":1"),
+                ("ZSCORE z a", "0"),
+                ("ZINCRBY z2 -0 b", "-0"),
+                ("ZSCORE z2 b", "0"),
+                (&format!("ZADD z3 -0 a 1 {long}"), ":2"),
+                ("ZSCORE z3 a", "-0"),
+                ("ZADD z4 -0 a", ":1"),
+                (&format!("ZADD z4 1 {long}"), ":1"),
+                ("ZADD z4 -0 b", ":1"),
+                ("ZRANGE z4 0 -1 WITHSCORES", &format!("[a 0 b -0 {long} 1]")),
+                ("ZADD z5 1 a", ":1"),
+                ("ZADD z5 -0 x 2 y", ":2"),
+                ("ZUNIONSTORE z6 1 z5 WEIGHTS -0", ":3"),
+                ("ZRANGE z6 0 -1 WITHSCORES", "[a 0 x 0 y 0]"),
+                ("ZADD m 3 c", ":1"),
+                ("ZADD m inf a", ":1"),
+                ("ZREMRANGEBYLEX m [a [a", ":0"),
+                ("ZLEXCOUNT m [a [a", ":0"),
+                ("ZRANGEBYLEX m [a [a", "[]"),
+                ("ZREVRANGEBYLEX m [a [a", "[]"),
+                ("ZRANGE m [a [a BYLEX REV", "[]"),
+                ("ZRANGEBYLEX m [a [c", "[c a]"),
+                ("ZRANGEBYLEX m - +", "[c a]"),
+                ("ZLEXCOUNT m [b [z", ":0"),
+                ("ZADD n 1 b 2 a", ":2"),
+                ("ZRANGEBYLEX n [b [c", "[]"),
+                ("ZREMRANGEBYLEX n [b [c", ":0"),
+                ("ZRANGEBYLEX n [a [z", "[b a]"),
+                ("ZREVRANGEBYLEX n [z [a", "[a b]"),
+                ("ZREVRANGEBYLEX n [b [a", "[a b]"),
+                ("ZRANGEBYLEX n [a [b LIMIT 1 1", "[a]"),
+                ("ZRANGESTORE n2 n [a [z BYLEX", ":2"),
+                ("ZRANGE n2 0 -1 WITHSCORES", "[b 1 a 2]"),
+            ],
+        );
+    });
+}
+
 #[test]
 fn string_hash_and_key_edge_cases() {
     guarded("str-hash-key-edges", 60, || {
@@ -3193,7 +3258,23 @@ fn string_hash_and_key_edge_cases() {
                 ("INCRBYFLOAT w 1", &format!("-{NOT_FLOAT}")),
                 ("RPUSH li a", ":1"),
                 ("INCRBYFLOAT li 1", &format!("-{WRONGTYPE}")),
-                ("INCRBYFLOAT li abc", &format!("-{NOT_FLOAT}")),
+                ("INCRBYFLOAT li abc", &format!("-{WRONGTYPE}")),
+                ("INCRBYFLOAT w abc", &format!("-{NOT_FLOAT}")),
+                ("SET hx 0x10", "OK"),
+                ("INCRBYFLOAT hx 0x10", "32"),
+                ("INCRBYFLOAT dec 0.1", "0.1"),
+                ("INCRBYFLOAT dec 0.2", "0.3"),
+                ("INCRBYFLOAT big 9223372036854775807", "9223372036854775807"),
+                ("INCRBYFLOAT tiny 0x1p-1074", "0"),
+                ("HINCRBYFLOAT hf a 0.1", "0.1"),
+                ("HINCRBYFLOAT hf a 0.2", "0.3"),
+                ("HINCRBYFLOAT hf a inf", "-ERR value is NaN or Infinity"),
+                ("HSET hf b inf", ":1"),
+                ("HINCRBYFLOAT hf b 1", &format!("-{NAN_OR_INF}")),
+                ("ZINCRBY nz -0 m", "-0"),
+                ("ZADD nz INCR 1e300 m", "1e+300"),
+                ("ZADD nz 0x10 h", ":1"),
+                ("ZSCORE nz h", "16"),
                 // GETRANGE
                 ("SET g Hello_World", "OK"),
                 ("GETRANGE g 0 4", "Hello"),
@@ -3206,6 +3287,9 @@ fn string_hash_and_key_edge_cases() {
                 ("GETRANGE g -1 -5", ""),
                 ("GETRANGE g 3 3", "l"),
                 ("GETRANGE g -1 -1", "d"),
+                ("GETRANGE g 0 -100", "H"),
+                ("GETRANGE g -100 -100", "H"),
+                ("GETRANGE g -100 -200", ""),
                 ("SUBSTR g 1 2", "el"),
                 ("GETRANGE nokey 0 -1", ""),
                 ("GETRANGE li 0 -1", &format!("-{WRONGTYPE}")),
@@ -3243,7 +3327,7 @@ fn string_hash_and_key_edge_cases() {
                 ("HINCRBYFLOAT h a 1.5", "4"),
                 ("HINCRBYFLOAT h b 1", "-ERR hash value is not a float"),
                 ("HINCRBYFLOAT h c 1", "1"),
-                ("HINCRBYFLOAT h c inf", &format!("-{NAN_OR_INF}")),
+                ("HINCRBYFLOAT h c inf", "-ERR value is NaN or Infinity"),
                 ("HINCRBYFLOAT h c abc", &format!("-{NOT_FLOAT}")),
                 ("HINCRBYFLOAT g a 1", &format!("-{WRONGTYPE}")),
                 ("HINCRBYFLOAT newh f 0.25", "0.25"),

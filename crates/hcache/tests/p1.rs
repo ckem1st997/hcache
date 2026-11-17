@@ -616,6 +616,71 @@ fn hyperloglog_counts_merges_and_refuses_what_is_not_one() {
     assert!(error(s.execute(&["PFMERGE"])).contains("wrong number"));
 }
 
+/// What Valkey 9.1.3 stored and replied for the same commands.
+#[test]
+fn hyperloglog_strings_match_valkey() {
+    let (_db, s) = fresh();
+    let unhex = |h: &str| -> Vec<u8> {
+        (0..h.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap())
+            .collect()
+    };
+    let set = |key: &str, value: &[u8]| {
+        let cmd: Vec<Vec<u8>> = vec![b"SET".to_vec(), key.as_bytes().to_vec(), value.to_vec()];
+        s.execute(&cmd);
+    };
+    s.execute(&["PFADD", "e"]);
+    assert_eq!(
+        bytes(s.execute(&["GET", "e"])),
+        unhex("48594c4c0100000000000000000000807fff")
+    );
+    s.execute(&["PFADD", "s", "a", "b", "c"]);
+    assert_eq!(
+        bytes(s.execute(&["GET", "s"])),
+        unhex("48594c4c01000000000000000000008060f38050b1844bfb80425a")
+    );
+    // PFCOUNT of one key keeps the count in the string.
+    assert_eq!(s.execute(&["PFCOUNT", "s"]), Reply::Int(3));
+    assert_eq!(
+        bytes(s.execute(&["GET", "s"])),
+        unhex("48594c4c01000000030000000000000060f38050b1844bfb80425a")
+    );
+
+    // One register short, with a fresh cache: the cache answers, a union
+    // or a merge reads the registers and finds the damage.
+    let mut short = unhex("48594c4c0100000000000000000000007ffe");
+    set("c", &short);
+    assert_eq!(s.execute(&["PFCOUNT", "c"]), Reply::Int(0));
+    let corrupt = "INVALIDOBJ Corrupted HLL object detected";
+    assert_eq!(error(s.execute(&["PFCOUNT", "c", "s"])), corrupt);
+    assert_eq!(error(s.execute(&["PFMERGE", "m", "s", "c"])), corrupt);
+    assert!(!exists(&s, "m"));
+    // The destination is read like the sources.
+    assert_eq!(error(s.execute(&["PFMERGE", "c", "s"])), corrupt);
+    s.execute(&["RPUSH", "list", "x"]);
+    assert_eq!(error(s.execute(&["PFCOUNT", "c", "list"])), corrupt);
+    assert!(error(s.execute(&["PFCOUNT", "list", "c"])).starts_with("WRONGTYPE Operation"));
+    short[HDR_STALE] |= 0x80;
+    set("c", &short);
+    assert_eq!(error(s.execute(&["PFCOUNT", "c"])), corrupt);
+    set("blank", b"");
+    for cmd in [
+        vec!["PFCOUNT", "blank"],
+        vec!["PFADD", "blank", "a"],
+        vec!["PFMERGE", "m", "blank"],
+    ] {
+        assert_eq!(
+            error(s.execute(&cmd)),
+            "WRONGTYPE Key is not a valid HyperLogLog string value.",
+            "{cmd:?}"
+        );
+    }
+}
+
+/// The byte of an HLL header whose top bit marks the cached count stale.
+const HDR_STALE: usize = 15;
+
 #[test]
 fn hyperloglog_estimates_are_close() {
     let (_db, s) = fresh();
@@ -672,7 +737,10 @@ fn damaged_sketches_are_refused_not_trusted() {
             match s.execute(&cmd) {
                 Reply::Int(n) => assert!(n >= 0, "{cmd:?}"),
                 Reply::Ok => {}
-                Reply::Error(e) => assert!(e.contains("HyperLogLog"), "{e}"),
+                Reply::Error(e) => assert!(
+                    e.contains("HyperLogLog") || e == "INVALIDOBJ Corrupted HLL object detected",
+                    "{e}"
+                ),
                 other => panic!("{cmd:?}: {other:?}"),
             }
         }
