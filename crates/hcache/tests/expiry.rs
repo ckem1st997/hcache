@@ -4,7 +4,8 @@
 
 mod support;
 
-use hcache::{Reply, Session};
+use hcache::{Config, Reply, Session};
+use hcache_core::engine::Protected;
 use hcache_core::testutil::Rng;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -318,7 +319,9 @@ fn gen_op(rng: &mut Rng, model: &Model) -> Vec<String> {
     }
 }
 
-fn check(seed: u64, step: usize, args: &[String], got: &Reply, want: &Want, slack: i64) {
+fn check(seed: u64, step: usize, args: &[String], got: &Reply, want: &Want, started: Instant) {
+    // Measured after the reply, so a pause anywhere in the step is covered.
+    let slack = started.elapsed().as_millis() as i64 + 5;
     let ok = match want {
         Want::Exact(want) => enc(got) == enc(want),
         Want::Pttl(want) => matches!(got, Reply::Int(n) if (want - slack..=*want).contains(n)),
@@ -347,7 +350,6 @@ fn model_run(seed: u64, shards: usize, steps: usize) {
         if started.elapsed().as_millis() > 3_000 {
             break;
         }
-        let slack = started.elapsed().as_millis() as i64 + 5;
         match rng.below(20) {
             0 => {
                 let ms = (1 + rng.below(3)) * 10_000;
@@ -370,13 +372,13 @@ fn model_run(seed: u64, shards: usize, steps: usize) {
                     // A write first, so no expired copy of the key lingers.
                     let args = vec!["PERSIST".to_string(), key.clone()];
                     let want = model.apply(&args);
-                    check(seed, step, &args, &exec(&a, &args), &want, slack);
+                    check(seed, step, &args, &exec(&a, &args), &want, started);
                     assert_eq!(a.execute(&["WATCH", key]), Reply::Ok);
                     if rng.chance(2) {
                         let before = model.keys.get(key).cloned();
                         let args = gen_op(&mut rng, &model);
                         let want = model.apply(&args);
-                        check(seed, step, &args, &exec(&b, &args), &want, slack);
+                        check(seed, step, &args, &exec(&b, &args), &want, started);
                         must_abort = model.keys.get(key).cloned() != before;
                         may_abort = true;
                     }
@@ -404,13 +406,13 @@ fn model_run(seed: u64, shards: usize, steps: usize) {
                 assert_eq!(replies.len(), ops.len(), "seed {seed} step {step}");
                 for (args, got) in ops.iter().zip(&replies) {
                     let want = model.apply(args);
-                    check(seed, step, args, got, &want, slack);
+                    check(seed, step, args, got, &want, started);
                 }
             }
             _ => {
                 let args = gen_op(&mut rng, &model);
                 let want = model.apply(&args);
-                check(seed, step, &args, &exec(&a, &args), &want, slack);
+                check(seed, step, &args, &exec(&a, &args), &want, started);
             }
         }
         if step % 64 == 0 {
@@ -897,6 +899,29 @@ fn expired_keys_are_collected_without_being_touched() {
         db.advance_clock(50);
         assert_eq!(db.sweep_expired(), 5_000);
         assert_eq!(int(&run(&s, &["DBSIZE"])), 0);
+    });
+}
+
+#[test]
+fn set_active_expire_0_leaves_expired_keys_until_they_are_read() {
+    guarded("active-expire-off", 30, || {
+        // One shard, so the write below locks the shard holding the key.
+        let db = open(Config {
+            debug_command: Protected::Yes,
+            ..cfg(1, 4, 2)
+        });
+        let s = session(&db);
+        assert_eq!(run(&s, &["DEBUG", "SET-ACTIVE-EXPIRE", "0"]), Reply::Ok);
+        run(&s, &["SET", "gone", "v", "PX", "10"]);
+        // Past the deadline and past the pause between two sweeps.
+        db.advance_clock(100);
+        db.expire_tick();
+        run(&s, &["SET", "other", "v"]);
+        assert_eq!(int(&run(&s, &["DBSIZE"])), 2);
+        assert_eq!(run(&s, &["DEBUG", "SET-ACTIVE-EXPIRE", "1"]), Reply::Ok);
+        db.advance_clock(100);
+        run(&s, &["SET", "other", "w"]);
+        assert_eq!(int(&run(&s, &["DBSIZE"])), 1);
     });
 }
 

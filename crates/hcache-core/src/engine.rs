@@ -3337,8 +3337,11 @@ impl Engine {
         for task in batch.requeue.drain(..) {
             slot.queue.push(task);
         }
-        // Every lock hold also pays a little towards expiry.
-        shard.sweep_due();
+        // Every lock hold also pays a little towards expiry, unless DEBUG
+        // SET-ACTIVE-EXPIRE 0 turned the sweep off.
+        if self.active_expire.load(Ordering::Relaxed) {
+            shard.sweep_due();
+        }
     }
 
     /// Deliver what a lock hold produced. Called with no shard locked.
