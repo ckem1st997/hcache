@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = ["crates/hcache-core", "crates/hcache-server", "crates/hcache", "crates/hload", "crates/spikeb"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[profile.dev]
+opt-level = 1
+
+# lua-src turns on LUA_USE_APICHECK when its build script has debug
+# assertions. Stock Lua 5.1's pcall then aborts the process on deep pcall
+# recursion (one push past ci->top, inside the slack Lua reserves).
+[profile.dev.build-override]
+debug-assertions = false
+
+[profile.release]
+debug = 1
+# The hot path of a command crosses many functions in several crates; one
+# codegen unit with LTO keeps it together, which halved the instruction
+# TLB misses per command (spike/README.md, "Tối ưu 1 nhân").
+lto = "fat"
+codegen-units = 1

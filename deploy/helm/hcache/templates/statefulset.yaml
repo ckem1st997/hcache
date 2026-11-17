@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "hcache.fullname" . }}
+  labels:
+    {{- include "hcache.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "hcache.fullname" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "hcache.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hcache.labels" . | nindent 8 }}
+    # No checksum of the password here: pod annotations are read by more
+    # people than Secrets, and a short unsalted hash can be guessed. After a
+    # new password: kubectl rollout restart statefulset/<name>.
+    spec:
+      # SIGTERM gets 20 s to write everything to disk; this leaves room.
+      terminationGracePeriodSeconds: 60
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: hcache
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --bind
+            - 0.0.0.0
+            - --data
+            - /data/hcache.aof
+            {{- if .Values.metrics.enabled }}
+            - --metrics-port
+            - {{ .Values.metrics.port | quote }}
+            {{- end }}
+            {{- range .Values.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            - name: HCACHE_REQUIREPASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hcache.secretName" . }}
+                  key: password
+          ports:
+            - name: resp
+              containerPort: 6379
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            exec:
+              command: ["/usr/local/bin/hcache-server", "healthcheck"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["/usr/local/bin/hcache-server", "healthcheck"]
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          # Loading a large append-only file takes a while.
+          startupProbe:
+            exec:
+              command: ["/usr/local/bin/hcache-server", "healthcheck"]
+            periodSeconds: 2
+            failureThreshold: 300
+          # The endpoint goes before the process stops taking connections.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if not .Values.persistence.enabled }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+  {{- end }}

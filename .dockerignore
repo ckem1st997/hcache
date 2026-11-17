@@ -1,0 +1,8 @@
+# Only the sources the server is built from go to the builder.
+**/target
+clients
+bench
+deploy
+*.md
+*.pid
+.git

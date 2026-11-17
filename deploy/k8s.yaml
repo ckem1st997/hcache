@@ -1,0 +1,125 @@
+# HCache on Kubernetes or k3s: one replica keeping its data on a volume.
+# The password comes from a Secret made beforehand:
+#
+#   kubectl create secret generic hcache --from-literal=password=...
+#   kubectl apply -f deploy/k8s.yaml
+#
+# The image is the one `docker build -t hcache .` makes in spike/, pushed
+# to a registry the cluster can pull from: change `image` below to it.
+# Only pods labelled hcache-client: "true" may connect (NetworkPolicy, where
+# the cluster's network plugin enforces it; k3s does by default).
+apiVersion: v1
+kind: Service
+metadata:
+  name: hcache
+spec:
+  selector:
+    app: hcache
+  ports:
+    - name: resp
+      port: 6379
+      targetPort: resp
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hcache
+spec:
+  serviceName: hcache
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hcache
+  template:
+    metadata:
+      labels:
+        app: hcache
+    spec:
+      # SIGTERM gets 20 s to write everything to disk; this leaves room.
+      terminationGracePeriodSeconds: 60
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: hcache
+          image: hcache:latest
+          args: ["--bind", "0.0.0.0", "--data", "/data/hcache.aof"]
+          env:
+            - name: HCACHE_REQUIREPASS
+              valueFrom:
+                secretKeyRef:
+                  name: hcache
+                  key: password
+          ports:
+            - name: resp
+              containerPort: 6379
+          # Requests equal to limits: the Guaranteed class, evicted last.
+          # maxmemory follows the memory limit (--maxmemory auto): here
+          # 768 MiB for data, the rest for the process around it.
+          resources:
+            requests:
+              cpu: "2"
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            exec:
+              command: ["/usr/local/bin/hcache-server", "healthcheck"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["/usr/local/bin/hcache-server", "healthcheck"]
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          # Loading a large append-only file takes a while.
+          startupProbe:
+            exec:
+              command: ["/usr/local/bin/hcache-server", "healthcheck"]
+            periodSeconds: 2
+            failureThreshold: 300
+          # The endpoint goes before the process stops taking connections.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hcache
+spec:
+  podSelector:
+    matchLabels:
+      app: hcache
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              hcache-client: "true"
+      ports:
+        - port: 6379

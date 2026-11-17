@@ -1,0 +1,17 @@
+# Not part of the spike workspace: run it on its own.
+[workspace]
+
+[package]
+name = "dict_ab"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+mimalloc = { version = "0.1", default-features = false }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+debug = 1

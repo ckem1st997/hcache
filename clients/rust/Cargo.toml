@@ -1,0 +1,9 @@
+[package]
+name = "hcache-rust-compat"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+redis = "=1.8.2"
+
+[workspace]

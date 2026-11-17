@@ -1,0 +1,12 @@
+# Build output
+target/
+
+# Dependencies of the client test harnesses in clients/
+clients/node/node_modules/
+clients/python/.venv/
+clients/dotnet/bin/
+clients/dotnet/obj/
+__pycache__/
+
+# Files left by local runs
+*.pid
