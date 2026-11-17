@@ -1050,13 +1050,22 @@ fn a_subscriber_that_does_not_read_is_closed_too() {
         let mut sub = env.client();
         sub.cmd(&["SUBSCRIBE", "flood"]);
         let payload = "p".repeat(64 << 10);
-        // About 13 MB: more than the buffers, less than the limit that
-        // drops a subscriber outright.
-        for _ in 0..200 {
-            assert_eq!(
-                publisher.cmd(&["PUBLISH", "flood", &payload]),
-                Reply::Int(1)
-            );
+        // About 3 MB a second until the subscriber is gone. However much
+        // the kernel buffers take first (some Windows hosts take more than
+        // 13 MB), output then waits in the server for the 2 s stall timeout
+        // long before it reaches the 32 MB that drops a subscriber outright.
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let mut receivers = Reply::Int(1);
+            for _ in 0..16 {
+                receivers = publisher.cmd(&["PUBLISH", "flood", &payload]);
+            }
+            if receivers == Reply::Int(0) {
+                break;
+            }
+            assert_eq!(receivers, Reply::Int(1));
+            assert!(Instant::now() < deadline, "the subscriber is never closed");
+            thread::sleep(Duration::from_millis(300));
         }
         assert_eq!(
             env.wait_conns(1, 15),

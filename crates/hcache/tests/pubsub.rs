@@ -7,6 +7,8 @@ mod net;
 use hcache::Reply;
 use net::*;
 use std::io::Read;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -243,22 +245,30 @@ fn a_subscriber_that_never_reads_is_cut_off_and_others_are_not_held_up() {
     stuck.cmd(&["SUBSCRIBE", "flood"]);
     let mut healthy = env.client_with(Duration::from_secs(30));
     healthy.cmd(&["SUBSCRIBE", "flood"]);
-    let reader = thread::spawn(move || {
-        let mut got = 0usize;
-        while got < 600 {
-            let Reply::Array(parts) = healthy.read() else {
-                panic!("not a message");
-            };
-            assert_eq!(parts.len(), 3);
-            got += 1;
+    let got = Arc::new(AtomicUsize::new(0));
+    let reader = thread::spawn({
+        let got = got.clone();
+        move || {
+            while got.load(Ordering::Relaxed) < 600 {
+                let Reply::Array(parts) = healthy.read() else {
+                    panic!("not a message");
+                };
+                assert_eq!(parts.len(), 3);
+                got.fetch_add(1, Ordering::Relaxed);
+            }
+            healthy
         }
-        healthy
     });
     let mut publisher = env.client_with(Duration::from_secs(30));
     let payload = "p".repeat(100_000);
     let mut receivers_at_end = 0;
     // 60 MB: past the 32 MB a subscriber may fall behind.
-    for _ in 0..600 {
+    for sent in 0..600usize {
+        // The healthy reader stays within 5 MB, however slow the host is.
+        let caught_up = wait_until(30, || {
+            sent.saturating_sub(got.load(Ordering::Relaxed)) <= 50
+        });
+        assert!(caught_up, "the healthy subscriber stopped reading");
         match publisher.cmd(&["PUBLISH", "flood", &payload]) {
             Reply::Int(n) => receivers_at_end = n,
             other => panic!("{other:?}"),

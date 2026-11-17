@@ -39,7 +39,7 @@ What works today (each item is covered by tests in this repository; see [Known l
 - **Bloom and JSON.** `BF.*` and `JSON.*` are built in, with no module to load. They follow valkey-bloom 1.0.1 and valkey-json (same command names, replies and error strings), based on reading the modules' source and test suites; they have not been run against the real modules. JSON supports both legacy paths and JSONPath. Bloom and JSON keys are written to RDB under the valkey-bloom and valkey-json module types.
 - **TLS.** `--tls-port` with PEM certificate and key, optional client certificates, TLS 1.2 and 1.3 (rustls with `ring`).
 - **Prometheus and Helm.** `--metrics-port N` serves `GET /metrics` with `INFO` values under the names redis_exporter uses, with HTTP Basic auth when a password is set. `deploy/helm/hcache` is a minimal Helm chart (StatefulSet, PVC, Service, password Secret, optional ServiceMonitor, NetworkPolicy, restricted `securityContext`). The chart has not been rendered or installed yet.
-- **Containers.** A `Dockerfile` (distroless runtime image), `deploy/k8s.yaml`, a `healthcheck` subcommand, graceful shutdown on `SIGTERM`/`SIGINT`. The Docker and Kubernetes files have not been built or run yet.
+- **Containers.** A `Dockerfile` (distroless runtime image), `deploy/k8s.yaml`, a `healthcheck` subcommand, graceful shutdown on `SIGTERM`/`SIGINT`. CI builds the image for amd64 and arm64 and checks that each one starts, stores a key and stops cleanly before publishing it. The Kubernetes files have not been run yet.
 - **Single-node cluster mode.** `CLUSTER` info commands, `READONLY`, `READWRITE`, `ASKING` with `--cluster-enabled yes`. Multi-node cluster is only a design document.
 
 ## Crates
@@ -119,7 +119,7 @@ Every flag also has an environment variable: `HCACHE_` plus the flag name in upp
 
 Health check, for images without a shell: `hcache-server healthcheck [--port N]` exits 0 if the local server answers `PING`.
 
-Docker (not yet built or run on the development machine):
+Docker image of your own (CI publishes one, see [Quick start with Docker](#quick-start-with-docker)):
 
 ```bash
 docker build -t hcache .
@@ -242,7 +242,7 @@ This list is condensed; the full list of deviations from Redis is long.
 - **Concurrency details.** `KEYS` and `HGETALL` on large data are not atomic: they release the lock between batches. `DEL` and `UNLINK` of a very large hash free memory under the shard lock, and the hash table rehashes all at once. The embedded `Session` takes locks directly instead of through the shard queue, and has no background expiry thread (expired keys are collected on access; the sweep thread only runs with `Db::listen`).
 - **Memory ordering.** The execution gate omits a memory fence on x86. The argument holds for the x86 memory model but has not been checked with tools such as loom or miri.
 - **Test flake.** One full run saw `endless_pipeline_does_not_starve_another_connection_on_the_same_worker` miss its 500 ms threshold once; it has not been reproduced.
-- **Environment.** Not yet verified: the `Dockerfile`, `deploy/k8s.yaml`, and the Helm chart (no Docker, `helm` or Kubernetes on the development machine).
+- **Environment.** Not yet verified: `deploy/k8s.yaml` and the Helm chart (no `helm` or Kubernetes on the development machine).
 
 ## Documentation
 

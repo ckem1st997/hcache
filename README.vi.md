@@ -97,7 +97,7 @@ Chạy trong container (Docker, Kubernetes, k3s):
 - `SIGTERM` hoặc `SIGINT`: server ngừng nhận kết nối, các worker dừng, mọi thay đổi được ghi và `fsync` xuống đĩa, rồi thoát với mã 0. Quá 20 giây thì thoát luôn với mã 1; tín hiệu thứ hai, hoặc tín hiệu đến khi đang nạp tệp dữ liệu, thì thoát ngay. Trên Windows server vẫn chạy đến khi bị tắt như cũ.
 - `--protected-mode yes` là mặc định: server từ chối khởi động nếu nghe ở địa chỉ không phải loopback mà không có mật khẩu (trước đây chỉ in cảnh báo). `--protected-mode no` để bỏ qua.
 - `hcache-server healthcheck [--port N]` thoát với mã 0 nếu server trên máy này trả lời `PING` (cả khi server đòi mật khẩu). Dùng cho health check trong image không có shell.
-- `Dockerfile` (build trên Debian 13, chạy trên `gcr.io/distroless/cc-debian13:nonroot`, người dùng 65532, dữ liệu ở `/data`) và `deploy/k8s.yaml` (StatefulSet một bản, PVC, probe, `securityContext` theo mức restricted, request bằng limit). Hai tệp này chưa được build và chạy thử trên máy này vì chưa cài Docker.
+- `Dockerfile` (build trên Debian 13, chạy trên `gcr.io/distroless/cc-debian13:nonroot`, người dùng 65532, dữ liệu ở `/data`) và `deploy/k8s.yaml` (StatefulSet một bản, PVC, probe, `securityContext` theo mức restricted, request bằng limit). CI build image cho amd64 và arm64, kiểm từng bản khởi động, ghi và đọc một khóa, dừng gọn, rồi mới đăng lên. `deploy/k8s.yaml` chưa được chạy thử.
 
 ```bash
 docker build -t hcache .
