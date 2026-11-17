@@ -17,9 +17,9 @@ rustup component add llvm-tools >/dev/null
 PROFDATA=$(find "$(rustc --print sysroot)" -name llvm-profdata -type f | head -1)
 [ -x "$PROFDATA" ] || { echo "llvm-profdata not found" >&2; exit 1; }
 rm -rf "$WORK/profiles" && mkdir -p "$WORK/profiles" "$(dirname "$OUT")"
-cargo build -q --release -p hload
+cargo build -q --release --locked -p hload
 RUSTFLAGS="-Cprofile-generate=$PWD/$WORK/profiles" \
-    cargo build -q --release -p hcache-server --target-dir "$WORK/gen"
+    cargo build -q --release --locked -p hcache-server --target-dir "$WORK/gen"
 "$WORK/gen/release/hcache-server" --port $PORT --workers 1 >/dev/null 2>&1 &
 pid=$!
 trap 'kill $pid 2>/dev/null || true' EXIT
@@ -44,6 +44,6 @@ kill $pid && wait $pid || true
 trap - EXIT
 "$PROFDATA" merge -o "$WORK/merged.profdata" "$WORK"/profiles/*.profraw
 RUSTFLAGS="-Cprofile-use=$PWD/$WORK/merged.profdata" \
-    cargo build -q --release -p hcache-server --target-dir "$WORK/use"
+    cargo build -q --release --locked -p hcache-server --target-dir "$WORK/use"
 cp "$WORK/use/release/hcache-server" "$OUT"
 echo "built $OUT"

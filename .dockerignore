@@ -2,6 +2,8 @@
 **/target
 clients
 bench
+# The image is built with profile-guided optimisation.
+!bench/pgo_build.sh
 deploy
 *.md
 *.pid

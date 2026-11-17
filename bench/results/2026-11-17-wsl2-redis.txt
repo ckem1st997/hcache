@@ -1,0 +1,23 @@
+# 2026-11-17 WSL2, 8 vCPUs. bench/ab_cores.sh CORES KEYS ROUNDS valkey redis head headpgo
+# valkey = Valkey 9.1.3, redis = Redis 8.10.2 (both built from source), head = HCache regular build, headpgo = HCache PGO build.
+# Pipeline 16, 64 connections, 10% writes, 64-byte values; 6 rounds at 1 core, 5 at 4.
+== 1 core, keys 100000
+head     mean    596974  sd    4170  n 6  vs valkey 0.955
+headpgo  mean    666502  sd    7177  n 6  vs valkey 1.066
+redis    mean    643703  sd    4196  n 6  vs valkey 1.029
+valkey   mean    625377  sd    3065  n 6  vs valkey 1.000
+== 1 core, keys 1000000
+head     mean    557773  sd   10309  n 6  vs valkey 0.902
+headpgo  mean    626139  sd    6991  n 6  vs valkey 1.013
+redis    mean    616455  sd    9679  n 6  vs valkey 0.997
+valkey   mean    618137  sd    3959  n 6  vs valkey 1.000
+== 4 cores, keys 100000
+head     mean   3191994  sd   46421  n 5  vs valkey 1.575
+headpgo  mean   3755954  sd  426113  n 5  vs valkey 1.854
+redis    mean   2019482  sd   54773  n 5  vs valkey 0.997
+valkey   mean   2026378  sd   47028  n 5  vs valkey 1.000
+== 4 cores, keys 1000000
+head     mean   2896762  sd   37248  n 5  vs valkey 1.399
+headpgo  mean   3661890  sd   42378  n 5  vs valkey 1.769
+redis    mean   1893637  sd   30209  n 5  vs valkey 0.915
+valkey   mean   2069892  sd   47761  n 5  vs valkey 1.000

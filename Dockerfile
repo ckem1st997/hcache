@@ -28,12 +28,21 @@
 # change to /data and exits 0 within 20 seconds.
 
 FROM rust:1-trixie AS build
+# The server is built with profile-guided optimisation: an instrumented
+# build serves a minute of hload traffic, then the release build is laid
+# out from that profile (bench/pgo_build.sh). --build-arg PGO=0 skips it:
+# a quicker build, and a server 10 to 25% slower.
+ARG PGO=1
 WORKDIR /src
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p hcache-server \
-    && cp target/release/hcache-server /hcache-server \
+    if [ "$PGO" = 1 ]; then \
+        bash bench/pgo_build.sh /hcache-server; \
+    else \
+        cargo build --release --locked -p hcache-server \
+        && cp target/release/hcache-server /hcache-server; \
+    fi \
     && mkdir /data
 
 FROM gcr.io/distroless/cc-debian13:nonroot
