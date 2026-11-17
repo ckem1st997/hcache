@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/hcache-logo.png" alt="HCache logo" width="128">
+</p>
+
 # HCache
 
 HCache is an in-memory cache written in Rust that speaks the Redis and Valkey protocol (RESP2 and RESP3) and can also be embedded in a Rust program as a library. It runs as a TCP server that existing Redis and Valkey clients can talk to, and as an in-process engine with the same command set.

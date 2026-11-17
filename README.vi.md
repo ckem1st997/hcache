@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/hcache-logo.png" alt="Logo HCache" width="128">
+</p>
+
 # HCache: mã thử nghiệm giai đoạn 0 (Spike A và Spike B)
 
 Đây là mã dùng để đo và quyết định, không phải sản phẩm. Nó sẽ bị bỏ đi sau giai đoạn 0; chỉ kết luận và bài học được mang sang giai đoạn sau.
