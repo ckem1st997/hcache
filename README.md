@@ -6,6 +6,23 @@ HCache is an in-memory cache written in Rust that speaks the Redis and Valkey pr
 
 Tiếng Việt: [README.vi.md](README.vi.md)
 
+## Quick start with Docker
+
+Images for linux/amd64 and linux/arm64 are built from the `main` branch and published to GitHub Container Registry:
+
+```bash
+docker run -d --name hcache -p 6379:6379 -v hcache-data:/data \
+  -e HCACHE_REQUIREPASS='choose-a-password' ghcr.io/ckem1st997/hcache:latest
+```
+
+Then connect with any Redis or Valkey client, for example `valkey-cli -a 'choose-a-password' PING`.
+
+- The container listens on all interfaces, so it refuses to start without a password.
+- Data is kept in the `/data` volume. `docker stop` writes every change and exits cleanly.
+- Settings go in environment variables: `HCACHE_` plus the flag name, for example `-e HCACHE_WORKERS=4`. Prometheus metrics: `-p 9121:9121 -e HCACHE_METRICS_PORT=9121`.
+- Tags: `latest` and `main` follow the main branch, `sha-<commit>` pins one build. There are no releases yet.
+- On Kubernetes, the Helm chart in `deploy/helm/hcache` uses this image.
+
 ## Features
 
 What works today (each item is covered by tests in this repository; see [Known limitations](#known-limitations) for what does not):

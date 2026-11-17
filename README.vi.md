@@ -5,6 +5,23 @@
 - **Spike A:** server RESP tối giản viết theo sáu nguyên tắc kiến trúc của kế hoạch bản 2 (tài liệu nội bộ), kèm bản nhúng và công cụ phát tải cho bảy ca xấu.
 - **Spike B:** hai nguyên mẫu bảng băm (kiểu con trỏ như Redis, và kiểu gọn) để đo số byte mỗi khóa ở 10 triệu khóa.
 
+## Chạy nhanh bằng Docker
+
+Image cho linux/amd64 và linux/arm64 được build từ nhánh `main` và đăng lên GitHub Container Registry:
+
+```bash
+docker run -d --name hcache -p 6379:6379 -v hcache-data:/data \
+  -e HCACHE_REQUIREPASS='mat-khau-cua-ban' ghcr.io/ckem1st997/hcache:latest
+```
+
+Rồi kết nối bằng client Redis hay Valkey bất kỳ, ví dụ `valkey-cli -a 'mat-khau-cua-ban' PING`.
+
+- Container nghe trên mọi địa chỉ, nên không chịu chạy nếu thiếu mật khẩu.
+- Dữ liệu nằm trong volume `/data`. `docker stop` ghi hết thay đổi rồi thoát gọn.
+- Thiết lập truyền bằng biến môi trường: `HCACHE_` cộng tên cờ, ví dụ `-e HCACHE_WORKERS=4`. Số liệu Prometheus: `-p 9121:9121 -e HCACHE_METRICS_PORT=9121`.
+- Tag: `latest` và `main` theo nhánh main, `sha-<commit>` ghim một bản build. Chưa có bản phát hành.
+- Trên Kubernetes, Helm chart ở `deploy/helm/hcache` dùng image này.
+
 ## Lệnh
 
 Máy này phải dùng toolchain MSVC; toolchain mặc định (gnu) không build được. Mọi lệnh chạy trong thư mục `spike`.

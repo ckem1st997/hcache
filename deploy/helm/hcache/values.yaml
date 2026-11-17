@@ -1,9 +1,10 @@
-# The image `docker build -t hcache .` makes in spike/, pushed to a
-# registry the cluster can pull from.
+# The image CI publishes for amd64 and arm64. `latest` follows the main
+# branch, so it is pulled on every start; pin a tag such as `sha-<commit>`
+# and use IfNotPresent for a fixed build.
 image:
-  repository: hcache
+  repository: ghcr.io/ckem1st997/hcache
   tag: latest
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 auth:
   # A Secret made beforehand, with the key `password` (and `username`,

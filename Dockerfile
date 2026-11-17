@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 #
 # The HCache server: built on Debian 13, run on distroless (no shell, no
-# package manager) as the unprivileged user 65532. From this folder:
+# package manager) as the unprivileged user 65532. CI publishes it for
+# amd64 and arm64 as ghcr.io/ckem1st997/hcache. To build it yourself, from
+# this folder:
 #
 #   docker build -t hcache .
 #   docker run -d -p 6379:6379 -v hcache-data:/data -m 1g \
