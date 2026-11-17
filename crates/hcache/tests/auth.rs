@@ -709,8 +709,10 @@ $67108864
         .as_bytes(),
     );
     let replies = c.read_until_closed();
+    // Windows throws away what had already arrived once the reset that the
+    // close causes comes in, so there the error may never be read.
     assert!(
-        matches!(replies.as_slice(), [Reply::Error(_)]),
+        matches!(replies.as_slice(), [Reply::Error(_)]) || (cfg!(windows) && replies.is_empty()),
         "{replies:?}"
     );
 }
