@@ -19,9 +19,48 @@ Then connect with any Redis or Valkey client, for example `valkey-cli -a 'choose
 
 - The container listens on all interfaces, so it refuses to start without a password.
 - Data is kept in the `/data` volume. `docker stop` writes every change and exits cleanly.
-- Settings go in environment variables: `HCACHE_` plus the flag name, for example `-e HCACHE_WORKERS=4`. Prometheus metrics: `-p 9121:9121 -e HCACHE_METRICS_PORT=9121`.
+- Settings go in environment variables, for example `-e HCACHE_WORKERS=4`; see [Configuration](#configuration). Prometheus metrics: `-p 9121:9121 -e HCACHE_METRICS_PORT=9121`.
 - Tags: `latest` and `main` follow the main branch, `sha-<commit>` pins one build. There are no releases yet.
 - On Kubernetes, the Helm chart in `deploy/helm/hcache` uses this image.
+
+## Configuration
+
+Every setting can be given as a command-line flag or as an environment variable: `HCACHE_` plus the flag name in capitals, with dashes turned into underscores. When both are set, the command line wins. A bad value or an unknown flag stops the server from starting.
+
+| Environment variable | Flag | Default | What it does |
+|---|---|---|---|
+| `HCACHE_REQUIREPASS` | `--requirepass` | none | Password of the `default` user. Prefer the variable: the server removes it from its own environment after reading it, while a command line is visible to other users of the machine. |
+| `HCACHE_BIND` | `--bind` | `127.0.0.1` | Address to listen on. |
+| `HCACHE_PORT` | `--port` | `6379` | RESP port. `0` together with a TLS port means TLS only. |
+| `HCACHE_PROTECTED_MODE` | `--protected-mode` | `yes` | `yes` refuses to listen beyond loopback without a password. |
+| `HCACHE_WORKERS` | `--workers` | number of CPUs | Threads serving connections. `1` runs every command on one thread. |
+| `HCACHE_SHARDS` | `--shards` | `64` | Shards per database. |
+| `HCACHE_DATABASES` | `--databases` | `16` | Number of databases for `SELECT`. |
+| `HCACHE_HASH_TAGS` | `--hash-tags` (no value) | `no` | `yes` (or the flag) places `a{tag}b` by `tag`, as Redis Cluster does. |
+| `HCACHE_MAXMEMORY` | `--maxmemory` | `auto` | Memory limit: bytes, or `256mb`, `1gb`. `auto`: under a container memory limit, leave a quarter of it (at least 128 MiB, at most half) to the rest of the process; with no limit, none. |
+| `HCACHE_MAXMEMORY_POLICY` | `--maxmemory-policy` | `noeviction` | `noeviction`, `allkeys-lru`, `allkeys-lfu`, `allkeys-random`, `volatile-lru`, `volatile-lfu`, `volatile-random`, `volatile-ttl`. |
+| `HCACHE_DATA` | `--data` | none | Data file. Without it, nothing survives a restart. |
+| `HCACHE_APPENDFSYNC` | `--appendfsync` | `everysec` | `always` answers a write only once it is on disk; `everysec` syncs every `--sync-interval-ms`; `no` leaves it to the system. |
+| `HCACHE_SYNC_INTERVAL_MS` | `--sync-interval-ms` | `100` | How often `everysec` syncs, in milliseconds. |
+| `HCACHE_MEMORY_DBS` | `--memory-dbs` | none | Databases kept out of the data file, for example `0,2`. |
+| `HCACHE_DIR` | `--dir` | none | Folder of the RDB file that `SAVE` and `BGSAVE` write and a start with empty databases loads. |
+| `HCACHE_DBFILENAME` | `--dbfilename` | `dump.rdb` | Name of the RDB file. |
+| `HCACHE_TIMEOUT` | `--timeout` | none | Close clients idle for this many seconds. |
+| `HCACHE_THP` | `--thp` | `off` | `off` turns transparent huge pages off for the process; `inherit` keeps the system's setting. |
+| `HCACHE_TLS_PORT` | `--tls-port` | none | TLS port. |
+| `HCACHE_TLS_CERT_FILE` | `--tls-cert-file` | none | Server certificate (PEM). |
+| `HCACHE_TLS_KEY_FILE` | `--tls-key-file` | none | Server private key (PEM). |
+| `HCACHE_TLS_CA_CERT_FILE` | `--tls-ca-cert-file` | none | CA that client certificates must chain to. |
+| `HCACHE_TLS_AUTH_CLIENTS` | `--tls-auth-clients` | `yes` when a CA is given | `yes`, `optional` or `no`. |
+| `HCACHE_MEMCACHED_PORT` | `--memcached-port` | off | Port for the Memcached text protocol (database 0). |
+| `HCACHE_METRICS_PORT` | `--metrics-port` | off | Port for Prometheus `GET /metrics`. |
+| `HCACHE_CLUSTER_ENABLED` | `--cluster-enabled` | `no` | `yes` answers as a one-node Redis Cluster. |
+| `HCACHE_CLUSTER_DATABASES` | `--cluster-databases` | `1` | Databases in cluster mode. |
+| `HCACHE_ENABLE_DEBUG_COMMAND` | `--enable-debug-command` | `no` | `no`, `yes`, or `local` (only connections from this machine). |
+
+Any setting that `CONFIG SET` accepts can be given at start the same way, for example `HCACHE_NOTIFY_KEYSPACE_EVENTS=KEA`, `HCACHE_SLOWLOG_MAX_LEN=512` or `HCACHE_LAZYFREE_LAZY_USER_DEL=no`.
+
+In the Docker image the command line already sets `--bind 0.0.0.0 --data /data/hcache.aof`, so `HCACHE_BIND` and `HCACHE_DATA` have no effect there unless you replace the command. Variables that Kubernetes or Docker links create for a service named `hcache` (`HCACHE_SERVICE_*`, `HCACHE_PORT_*`, `HCACHE_PORT=tcp://...`) are ignored.
 
 ## Features
 
@@ -117,7 +156,7 @@ Main flags:
 
 Every flag also has an environment variable: `HCACHE_` plus the flag name in upper case with dashes turned into underscores (`HCACHE_WORKERS=4` is `--workers 4`). The command line wins when both are set. Any setting that `CONFIG SET` accepts can also be given at startup as `--name value` or `HCACHE_NAME=value`. A bad value or an unknown flag stops the server from starting.
 
-Health check, for images without a shell: `hcache-server healthcheck [--port N]` exits 0 if the local server answers `PING`.
+Health check, for images without a shell: `hcache-server healthcheck [--port N]` exits 0 if the local server answers `PING`. Without `--port` it asks the port in `HCACHE_PORT`, else 6379.
 
 Docker image of your own (CI publishes one, see [Quick start with Docker](#quick-start-with-docker)):
 

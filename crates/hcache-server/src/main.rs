@@ -48,7 +48,8 @@ const USAGE: &str = "usage: hcache-server [--bind ADDR] [--port N] [--workers N]
     A second one, or one while the data file is loading, stops it at once. SHUTDOWN stops it \
     as the first one does.\n\
     --protected-mode yes (the default) refuses to listen beyond loopback with no password.\n\
-    healthcheck exits 0 when a server on this machine answers PING on the plain port.\n\
+    healthcheck exits 0 when a server on this machine answers PING on the plain port: \
+    --port, else HCACHE_PORT, else 6379.\n\
     --appendfsync: always answers a write only once it is on disk; everysec (the default) \
     brings the disk up to date every --sync-interval-ms (100); no leaves that to the system.\n\
     --port 0 with --tls-port listens with TLS only.\n\
@@ -778,7 +779,7 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
 /// machine answers PING. For container health checks, in an image with
 /// no shell and no client.
 fn healthcheck(mut args: impl Iterator<Item = String>) -> ExitCode {
-    let mut port = 6379;
+    let mut port = health_port(std::env::var("HCACHE_PORT").ok().as_deref());
     while let Some(flag) = args.next() {
         let value = args.next().filter(|_| flag == "--port");
         match value.and_then(|value| value.parse().ok()) {
@@ -796,6 +797,13 @@ fn healthcheck(mut args: impl Iterator<Item = String>) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The port healthcheck asks when no --port is given: the server's, if a
+/// container set it with HCACHE_PORT, else 6379. A service link
+/// (`tcp://...`) is not a port.
+fn health_port(var: Option<&str>) -> u16 {
+    var.and_then(|port| port.parse().ok()).unwrap_or(6379)
 }
 
 fn ping(port: u16) -> std::io::Result<()> {
@@ -912,6 +920,13 @@ mod tests {
         assert!(args.settings.is_empty());
         let args = parse(&[("HCACHE_PORT", "7000")], &[]).unwrap();
         assert_eq!(args.server.addr.port(), 7000);
+    }
+
+    #[test]
+    fn healthcheck_asks_the_port_the_environment_gave_the_server() {
+        assert_eq!(health_port(Some("7000")), 7000);
+        assert_eq!(health_port(Some("tcp://10.0.0.7:6379")), 6379);
+        assert_eq!(health_port(None), 6379);
     }
 
     #[test]

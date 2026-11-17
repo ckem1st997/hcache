@@ -18,9 +18,48 @@ Rồi kết nối bằng client Redis hay Valkey bất kỳ, ví dụ `valkey-cl
 
 - Container nghe trên mọi địa chỉ, nên không chịu chạy nếu thiếu mật khẩu.
 - Dữ liệu nằm trong volume `/data`. `docker stop` ghi hết thay đổi rồi thoát gọn.
-- Thiết lập truyền bằng biến môi trường: `HCACHE_` cộng tên cờ, ví dụ `-e HCACHE_WORKERS=4`. Số liệu Prometheus: `-p 9121:9121 -e HCACHE_METRICS_PORT=9121`.
+- Thiết lập truyền bằng biến môi trường, ví dụ `-e HCACHE_WORKERS=4`; danh sách đủ ở mục [Biến môi trường](#biến-môi-trường). Số liệu Prometheus: `-p 9121:9121 -e HCACHE_METRICS_PORT=9121`.
 - Tag: `latest` và `main` theo nhánh main, `sha-<commit>` ghim một bản build. Chưa có bản phát hành.
 - Trên Kubernetes, Helm chart ở `deploy/helm/hcache` dùng image này.
+
+## Biến môi trường
+
+Mọi thiết lập đều truyền được bằng cờ dòng lệnh hoặc bằng biến môi trường: `HCACHE_` cộng tên cờ viết hoa, gạch ngang đổi thành gạch dưới. Khi có cả hai, dòng lệnh thắng. Giá trị sai hoặc cờ lạ làm server không khởi động.
+
+| Biến môi trường | Cờ | Mặc định | Tác dụng |
+|---|---|---|---|
+| `HCACHE_REQUIREPASS` | `--requirepass` | không có | Mật khẩu của người dùng `default`. Nên dùng biến: server xóa nó khỏi môi trường của mình ngay sau khi đọc, còn dòng lệnh thì người dùng khác trên máy đọc được. |
+| `HCACHE_BIND` | `--bind` | `127.0.0.1` | Địa chỉ để nghe. |
+| `HCACHE_PORT` | `--port` | `6379` | Cổng RESP. `0` kèm cổng TLS nghĩa là chỉ nghe TLS. |
+| `HCACHE_PROTECTED_MODE` | `--protected-mode` | `yes` | `yes` từ chối nghe ngoài loopback khi chưa có mật khẩu. |
+| `HCACHE_WORKERS` | `--workers` | số CPU | Số luồng phục vụ kết nối. `1` chạy mọi lệnh trên một luồng. |
+| `HCACHE_SHARDS` | `--shards` | `64` | Số shard mỗi database. |
+| `HCACHE_DATABASES` | `--databases` | `16` | Số database cho `SELECT`. |
+| `HCACHE_HASH_TAGS` | `--hash-tags` (không có giá trị) | `no` | `yes` (hoặc có cờ) xếp `a{tag}b` theo `tag`, như Redis Cluster. |
+| `HCACHE_MAXMEMORY` | `--maxmemory` | `auto` | Giới hạn bộ nhớ: số byte, hoặc `256mb`, `1gb`. `auto`: khi container có giới hạn bộ nhớ, chừa một phần tư (ít nhất 128 MiB, nhiều nhất một nửa) cho phần còn lại của tiến trình; không có giới hạn thì không giới hạn. |
+| `HCACHE_MAXMEMORY_POLICY` | `--maxmemory-policy` | `noeviction` | `noeviction`, `allkeys-lru`, `allkeys-lfu`, `allkeys-random`, `volatile-lru`, `volatile-lfu`, `volatile-random`, `volatile-ttl`. |
+| `HCACHE_DATA` | `--data` | không có | Tệp dữ liệu. Không có thì khởi động lại là mất hết. |
+| `HCACHE_APPENDFSYNC` | `--appendfsync` | `everysec` | `always` chỉ trả lời lệnh ghi khi nó đã xuống đĩa; `everysec` đồng bộ mỗi `--sync-interval-ms`; `no` để hệ điều hành lo. |
+| `HCACHE_SYNC_INTERVAL_MS` | `--sync-interval-ms` | `100` | Chu kỳ đồng bộ của `everysec`, tính bằng mili giây. |
+| `HCACHE_MEMORY_DBS` | `--memory-dbs` | không có | Các database không ghi vào tệp dữ liệu, ví dụ `0,2`. |
+| `HCACHE_DIR` | `--dir` | không có | Thư mục của tệp RDB mà `SAVE`, `BGSAVE` ghi ra và lần khởi động với database rỗng nạp vào. |
+| `HCACHE_DBFILENAME` | `--dbfilename` | `dump.rdb` | Tên tệp RDB. |
+| `HCACHE_TIMEOUT` | `--timeout` | không có | Đóng client không gửi gì trong chừng ấy giây. |
+| `HCACHE_THP` | `--thp` | `off` | `off` tắt transparent huge pages cho tiến trình; `inherit` giữ thiết lập của hệ thống. |
+| `HCACHE_TLS_PORT` | `--tls-port` | không có | Cổng TLS. |
+| `HCACHE_TLS_CERT_FILE` | `--tls-cert-file` | không có | Chứng chỉ của server (PEM). |
+| `HCACHE_TLS_KEY_FILE` | `--tls-key-file` | không có | Khóa riêng của server (PEM). |
+| `HCACHE_TLS_CA_CERT_FILE` | `--tls-ca-cert-file` | không có | CA mà chứng chỉ client phải thuộc về. |
+| `HCACHE_TLS_AUTH_CLIENTS` | `--tls-auth-clients` | `yes` khi có CA | `yes`, `optional` hoặc `no`. |
+| `HCACHE_MEMCACHED_PORT` | `--memcached-port` | tắt | Cổng cho giao thức text của Memcached (database 0). |
+| `HCACHE_METRICS_PORT` | `--metrics-port` | tắt | Cổng cho `GET /metrics` của Prometheus. |
+| `HCACHE_CLUSTER_ENABLED` | `--cluster-enabled` | `no` | `yes` trả lời như một Redis Cluster một nút. |
+| `HCACHE_CLUSTER_DATABASES` | `--cluster-databases` | `1` | Số database ở chế độ cluster. |
+| `HCACHE_ENABLE_DEBUG_COMMAND` | `--enable-debug-command` | `no` | `no`, `yes`, hoặc `local` (chỉ kết nối từ chính máy này). |
+
+Thiết lập nào `CONFIG SET` nhận thì cũng truyền được lúc khởi động theo cùng cách, ví dụ `HCACHE_NOTIFY_KEYSPACE_EVENTS=KEA`, `HCACHE_SLOWLOG_MAX_LEN=512`, `HCACHE_LAZYFREE_LAZY_USER_DEL=no`.
+
+Trong image Docker, dòng lệnh đã đặt sẵn `--bind 0.0.0.0 --data /data/hcache.aof`, nên `HCACHE_BIND` và `HCACHE_DATA` không có tác dụng ở đó trừ khi bạn thay lệnh. Các biến mà Kubernetes hay Docker link tự tạo cho service tên `hcache` (`HCACHE_SERVICE_*`, `HCACHE_PORT_*`, `HCACHE_PORT=tcp://...`) bị bỏ qua.
 
 ## Lệnh
 
@@ -96,7 +135,7 @@ Chạy trong container (Docker, Kubernetes, k3s):
 - `--thp off` là mặc định: tắt transparent huge pages cho tiến trình (`prctl`), như Redis và Valkey. `--thp inherit` để nguyên theo hệ thống. Đo trên WSL2 (THP kiểu `madvise`), 1 triệu khóa: để THP bật thì nhanh hơn 1,5 đến 2% nhưng tốn 180 byte mỗi khóa (RSS) thay vì 147.
 - `SIGTERM` hoặc `SIGINT`: server ngừng nhận kết nối, các worker dừng, mọi thay đổi được ghi và `fsync` xuống đĩa, rồi thoát với mã 0. Quá 20 giây thì thoát luôn với mã 1; tín hiệu thứ hai, hoặc tín hiệu đến khi đang nạp tệp dữ liệu, thì thoát ngay. Trên Windows server vẫn chạy đến khi bị tắt như cũ.
 - `--protected-mode yes` là mặc định: server từ chối khởi động nếu nghe ở địa chỉ không phải loopback mà không có mật khẩu (trước đây chỉ in cảnh báo). `--protected-mode no` để bỏ qua.
-- `hcache-server healthcheck [--port N]` thoát với mã 0 nếu server trên máy này trả lời `PING` (cả khi server đòi mật khẩu). Dùng cho health check trong image không có shell.
+- `hcache-server healthcheck [--port N]` thoát với mã 0 nếu server trên máy này trả lời `PING` (cả khi server đòi mật khẩu). Không có `--port` thì nó hỏi cổng trong `HCACHE_PORT`, không có nữa thì 6379. Dùng cho health check trong image không có shell.
 - `Dockerfile` (build trên Debian 13, chạy trên `gcr.io/distroless/cc-debian13:nonroot`, người dùng 65532, dữ liệu ở `/data`) và `deploy/k8s.yaml` (StatefulSet một bản, PVC, probe, `securityContext` theo mức restricted, request bằng limit). CI build image cho amd64 và arm64, kiểm từng bản khởi động, ghi và đọc một khóa, dừng gọn, rồi mới đăng lên. `deploy/k8s.yaml` chưa được chạy thử.
 
 ```bash
