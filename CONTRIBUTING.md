@@ -15,7 +15,7 @@ cargo test --workspace
 ## Code rules
 
 - Behaviour that a Redis or Valkey client can see should match Valkey 9.1.3. When it cannot, say so in the docs.
-- New behaviour comes with tests. Integration tests live in `crates/hcache/tests/`.
+- New behaviour comes with tests. Integration tests live in `crates/hotstash/tests/`.
 - Avoid `unwrap` and `expect` outside tests; return an error instead.
 - Every `unsafe` block has a `// SAFETY:` comment that says why it is sound.
 - Match the style of the code around your change, including how much it comments.

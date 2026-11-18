@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Interleaved A/B on one pinned vCPU: each round runs every server once,
-# so drift of the host hits all of them alike. Variants are HCache binaries
+# so drift of the host hits all of them alike. Variants are Hotstash binaries
 # in /root/variants (built by hand from the tree to compare).
 # Usage: bench/ab_one_core.sh KEYS ROUNDS [variant...]
 KEYS=$1; ROUNDS=$2; shift 2

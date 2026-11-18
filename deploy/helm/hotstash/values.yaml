@@ -1,0 +1,68 @@
+# The image CI publishes for amd64 and arm64. `latest` follows the main
+# branch, so it is pulled on every start; pin a tag such as `sha-<commit>`
+# and use IfNotPresent for a fixed build.
+image:
+  repository: ghcr.io/ckem1st997/hotstash
+  tag: latest
+  pullPolicy: Always
+
+auth:
+  # A Secret made beforehand, with the key `password` (and `username`,
+  # "default", for the ServiceMonitor). Empty: the chart makes one from
+  # `password` below, which must then be given (--set auth.password=...).
+  existingSecret: ""
+  password: ""
+
+persistence:
+  # Off: the data lives in an emptyDir and goes with the pod.
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+
+# Requests equal to limits: the Guaranteed class, evicted last. maxmemory
+# follows the memory limit (--maxmemory auto).
+resources:
+  requests:
+    cpu: "2"
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 1Gi
+
+# Prometheus metrics on their own port, under redis_exporter's names; 9121
+# is redis_exporter's port, so scrape configs made for it fit.
+metrics:
+  enabled: true
+  port: 9121
+  serviceMonitor:
+    # Needs the Prometheus Operator's CRDs.
+    enabled: false
+    interval: 30s
+    # A Secret with `username` and `password` for scraping. Empty: the
+    # user "default" and its password, which can do everything. Better: a
+    # user that can only read INFO, made once with
+    #   ACL SETUSER metrics on >PASSWORD -@all +info
+    # (kept in the data file), and its Secret named here. Either way the
+    # password crosses the network in clear: HTTP Basic, no TLS.
+    authSecret: ""
+
+# Only pods with these labels may connect to RESP, where the cluster's
+# network plugin enforces NetworkPolicy (k3s does by default).
+networkPolicy:
+  enabled: true
+  clientLabels:
+    hotstash-client: "true"
+  # Who may scrape the metrics port: by default any pod in the namespace
+  # "monitoring". The port asks for a password, sent in clear, so keep the
+  # pods that can reach it few.
+  metricsFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+
+# More flags for hotstash-server, as ["--maxmemory-policy", "allkeys-lru"].
+extraArgs: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

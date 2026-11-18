@@ -1,4 +1,4 @@
-# valkey-json 1.1.0 behaviour spec (for the HCache JSON.* reimplementation)
+# valkey-json 1.1.0 behaviour spec (for the Hotstash JSON.* reimplementation)
 
 Scope: what `JSON.*` does in valkey-json 1.1.0, the latest release (GitHub tag 1.1.0, commit b6644b78a8ae7fa62f70d4c8f750a388c0c2ca83), where RedisJSON differs, and test vectors.
 
@@ -984,7 +984,7 @@ Vector counts: 104 pairs, of which 102 are source-traced from tests (several run
 
 ---
 
-## 9. Implementation notes for HCache (derived from the above)
+## 9. Implementation notes for Hotstash (derived from the above)
 
 1. Store doubles as their original text and keep a "double" flag; ints as i64. Computed doubles use `%.17g` (C `printf`). Rust's `{}` for f64 is not the same format. Needs a `%.17g` clone (Valkey-json even prints a whole-valued double product as an integer text).
 2. Objects: keep insertion order; duplicate keys on parse keep the first position and the last value.

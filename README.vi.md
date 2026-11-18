@@ -1,10 +1,12 @@
 <p align="center">
-  <img src="docs/assets/hcache-logo.png" alt="Logo HCache" width="128">
+  <img src="docs/assets/hotstash-logo.png" alt="Logo Hotstash" width="128">
 </p>
 
-# HCache: mã thử nghiệm giai đoạn 0 (Spike A và Spike B)
+# Hotstash: mã thử nghiệm giai đoạn 0 (Spike A và Spike B)
 
 Đây là mã dùng để đo và quyết định, không phải sản phẩm. Nó sẽ bị bỏ đi sau giai đoạn 0; chỉ kết luận và bài học được mang sang giai đoạn sau.
+
+Trước ngày 2026-11-17 dự án tên là HCache. Đổi tên vì có quá nhiều dự án khác trùng tên đó.
 
 - **Spike A:** server RESP tối giản viết theo sáu nguyên tắc kiến trúc của kế hoạch bản 2 (tài liệu nội bộ), kèm bản nhúng và công cụ phát tải cho bảy ca xấu.
 - **Spike B:** hai nguyên mẫu bảng băm (kiểu con trỏ như Redis, và kiểu gọn) để đo số byte mỗi khóa ở 10 triệu khóa.
@@ -14,56 +16,56 @@
 Image cho linux/amd64 và linux/arm64 được build từ nhánh `main` và đăng lên GitHub Container Registry:
 
 ```bash
-docker run -d --name hcache -p 6379:6379 -v hcache-data:/data \
-  -e HCACHE_REQUIREPASS='mat-khau-cua-ban' ghcr.io/ckem1st997/hcache:latest
+docker run -d --name hotstash -p 6379:6379 -v hotstash-data:/data \
+  -e HOTSTASH_REQUIREPASS='mat-khau-cua-ban' ghcr.io/ckem1st997/hotstash:latest
 ```
 
 Rồi kết nối bằng client Redis hay Valkey bất kỳ, ví dụ `valkey-cli -a 'mat-khau-cua-ban' PING`.
 
 - Container nghe trên mọi địa chỉ, nên không chịu chạy nếu thiếu mật khẩu.
 - Dữ liệu nằm trong volume `/data`. `docker stop` ghi hết thay đổi rồi thoát gọn.
-- Thiết lập truyền bằng biến môi trường, ví dụ `-e HCACHE_WORKERS=4`; danh sách đủ ở mục [Biến môi trường](#biến-môi-trường). Số liệu Prometheus: `-p 9121:9121 -e HCACHE_METRICS_PORT=9121`.
+- Thiết lập truyền bằng biến môi trường, ví dụ `-e HOTSTASH_WORKERS=4`; danh sách đủ ở mục [Biến môi trường](#biến-môi-trường). Số liệu Prometheus: `-p 9121:9121 -e HOTSTASH_METRICS_PORT=9121`.
 - Tag: `latest` và `main` theo nhánh main, `sha-<commit>` ghim một bản build. Chưa có bản phát hành.
-- Trên Kubernetes, Helm chart ở `deploy/helm/hcache` dùng image này.
+- Trên Kubernetes, Helm chart ở `deploy/helm/hotstash` dùng image này.
 
 ## Biến môi trường
 
-Mọi thiết lập đều truyền được bằng cờ dòng lệnh hoặc bằng biến môi trường: `HCACHE_` cộng tên cờ viết hoa, gạch ngang đổi thành gạch dưới. Khi có cả hai, dòng lệnh thắng. Giá trị sai hoặc cờ lạ làm server không khởi động.
+Mọi thiết lập đều truyền được bằng cờ dòng lệnh hoặc bằng biến môi trường: `HOTSTASH_` cộng tên cờ viết hoa, gạch ngang đổi thành gạch dưới. Khi có cả hai, dòng lệnh thắng. Giá trị sai hoặc cờ lạ làm server không khởi động.
 
 | Biến môi trường | Cờ | Mặc định | Tác dụng |
 |---|---|---|---|
-| `HCACHE_REQUIREPASS` | `--requirepass` | không có | Mật khẩu của người dùng `default`. Nên dùng biến: server xóa nó khỏi môi trường của mình ngay sau khi đọc, còn dòng lệnh thì người dùng khác trên máy đọc được. |
-| `HCACHE_BIND` | `--bind` | `127.0.0.1` | Địa chỉ để nghe. |
-| `HCACHE_PORT` | `--port` | `6379` | Cổng RESP. `0` kèm cổng TLS nghĩa là chỉ nghe TLS. |
-| `HCACHE_PROTECTED_MODE` | `--protected-mode` | `yes` | `yes` từ chối nghe ngoài loopback khi chưa có mật khẩu. |
-| `HCACHE_WORKERS` | `--workers` | số CPU | Số luồng phục vụ kết nối. `1` chạy mọi lệnh trên một luồng. |
-| `HCACHE_SHARDS` | `--shards` | `64` | Số shard mỗi database. |
-| `HCACHE_DATABASES` | `--databases` | `16` | Số database cho `SELECT`. |
-| `HCACHE_HASH_TAGS` | `--hash-tags` (không có giá trị) | `no` | `yes` (hoặc có cờ) xếp `a{tag}b` theo `tag`, như Redis Cluster. |
-| `HCACHE_MAXMEMORY` | `--maxmemory` | `auto` | Giới hạn bộ nhớ: số byte, hoặc `256mb`, `1gb`. `auto`: khi container có giới hạn bộ nhớ, chừa một phần tư (ít nhất 128 MiB, nhiều nhất một nửa) cho phần còn lại của tiến trình; không có giới hạn thì không giới hạn. |
-| `HCACHE_MAXMEMORY_POLICY` | `--maxmemory-policy` | `noeviction` | `noeviction`, `allkeys-lru`, `allkeys-lfu`, `allkeys-random`, `volatile-lru`, `volatile-lfu`, `volatile-random`, `volatile-ttl`. |
-| `HCACHE_DATA` | `--data` | không có | Tệp dữ liệu. Không có thì khởi động lại là mất hết. |
-| `HCACHE_APPENDFSYNC` | `--appendfsync` | `everysec` | `always` chỉ trả lời lệnh ghi khi nó đã xuống đĩa; `everysec` đồng bộ mỗi `--sync-interval-ms`; `no` để hệ điều hành lo. |
-| `HCACHE_SYNC_INTERVAL_MS` | `--sync-interval-ms` | `100` | Chu kỳ đồng bộ của `everysec`, tính bằng mili giây. |
-| `HCACHE_MEMORY_DBS` | `--memory-dbs` | không có | Các database không ghi vào tệp dữ liệu, ví dụ `0,2`. |
-| `HCACHE_DIR` | `--dir` | không có | Thư mục của tệp RDB mà `SAVE`, `BGSAVE` ghi ra và lần khởi động với database rỗng nạp vào. |
-| `HCACHE_DBFILENAME` | `--dbfilename` | `dump.rdb` | Tên tệp RDB. |
-| `HCACHE_TIMEOUT` | `--timeout` | không có | Đóng client không gửi gì trong chừng ấy giây. |
-| `HCACHE_THP` | `--thp` | `off` | `off` tắt transparent huge pages cho tiến trình; `inherit` giữ thiết lập của hệ thống. |
-| `HCACHE_TLS_PORT` | `--tls-port` | không có | Cổng TLS. |
-| `HCACHE_TLS_CERT_FILE` | `--tls-cert-file` | không có | Chứng chỉ của server (PEM). |
-| `HCACHE_TLS_KEY_FILE` | `--tls-key-file` | không có | Khóa riêng của server (PEM). |
-| `HCACHE_TLS_CA_CERT_FILE` | `--tls-ca-cert-file` | không có | CA mà chứng chỉ client phải thuộc về. |
-| `HCACHE_TLS_AUTH_CLIENTS` | `--tls-auth-clients` | `yes` khi có CA | `yes`, `optional` hoặc `no`. |
-| `HCACHE_MEMCACHED_PORT` | `--memcached-port` | tắt | Cổng cho giao thức text của Memcached (database 0). |
-| `HCACHE_METRICS_PORT` | `--metrics-port` | tắt | Cổng cho `GET /metrics` của Prometheus. |
-| `HCACHE_CLUSTER_ENABLED` | `--cluster-enabled` | `no` | `yes` trả lời như một Redis Cluster một nút. |
-| `HCACHE_CLUSTER_DATABASES` | `--cluster-databases` | `1` | Số database ở chế độ cluster. |
-| `HCACHE_ENABLE_DEBUG_COMMAND` | `--enable-debug-command` | `no` | `no`, `yes`, hoặc `local` (chỉ kết nối từ chính máy này). |
+| `HOTSTASH_REQUIREPASS` | `--requirepass` | không có | Mật khẩu của người dùng `default`. Nên dùng biến: server xóa nó khỏi môi trường của mình ngay sau khi đọc, còn dòng lệnh thì người dùng khác trên máy đọc được. |
+| `HOTSTASH_BIND` | `--bind` | `127.0.0.1` | Địa chỉ để nghe. |
+| `HOTSTASH_PORT` | `--port` | `6379` | Cổng RESP. `0` kèm cổng TLS nghĩa là chỉ nghe TLS. |
+| `HOTSTASH_PROTECTED_MODE` | `--protected-mode` | `yes` | `yes` từ chối nghe ngoài loopback khi chưa có mật khẩu. |
+| `HOTSTASH_WORKERS` | `--workers` | số CPU | Số luồng phục vụ kết nối. `1` chạy mọi lệnh trên một luồng. |
+| `HOTSTASH_SHARDS` | `--shards` | `64` | Số shard mỗi database. |
+| `HOTSTASH_DATABASES` | `--databases` | `16` | Số database cho `SELECT`. |
+| `HOTSTASH_HASH_TAGS` | `--hash-tags` (không có giá trị) | `no` | `yes` (hoặc có cờ) xếp `a{tag}b` theo `tag`, như Redis Cluster. |
+| `HOTSTASH_MAXMEMORY` | `--maxmemory` | `auto` | Giới hạn bộ nhớ: số byte, hoặc `256mb`, `1gb`. `auto`: khi container có giới hạn bộ nhớ, chừa một phần tư (ít nhất 128 MiB, nhiều nhất một nửa) cho phần còn lại của tiến trình; không có giới hạn thì không giới hạn. |
+| `HOTSTASH_MAXMEMORY_POLICY` | `--maxmemory-policy` | `noeviction` | `noeviction`, `allkeys-lru`, `allkeys-lfu`, `allkeys-random`, `volatile-lru`, `volatile-lfu`, `volatile-random`, `volatile-ttl`. |
+| `HOTSTASH_DATA` | `--data` | không có | Tệp dữ liệu. Không có thì khởi động lại là mất hết. |
+| `HOTSTASH_APPENDFSYNC` | `--appendfsync` | `everysec` | `always` chỉ trả lời lệnh ghi khi nó đã xuống đĩa; `everysec` đồng bộ mỗi `--sync-interval-ms`; `no` để hệ điều hành lo. |
+| `HOTSTASH_SYNC_INTERVAL_MS` | `--sync-interval-ms` | `100` | Chu kỳ đồng bộ của `everysec`, tính bằng mili giây. |
+| `HOTSTASH_MEMORY_DBS` | `--memory-dbs` | không có | Các database không ghi vào tệp dữ liệu, ví dụ `0,2`. |
+| `HOTSTASH_DIR` | `--dir` | không có | Thư mục của tệp RDB mà `SAVE`, `BGSAVE` ghi ra và lần khởi động với database rỗng nạp vào. |
+| `HOTSTASH_DBFILENAME` | `--dbfilename` | `dump.rdb` | Tên tệp RDB. |
+| `HOTSTASH_TIMEOUT` | `--timeout` | không có | Đóng client không gửi gì trong chừng ấy giây. |
+| `HOTSTASH_THP` | `--thp` | `off` | `off` tắt transparent huge pages cho tiến trình; `inherit` giữ thiết lập của hệ thống. |
+| `HOTSTASH_TLS_PORT` | `--tls-port` | không có | Cổng TLS. |
+| `HOTSTASH_TLS_CERT_FILE` | `--tls-cert-file` | không có | Chứng chỉ của server (PEM). |
+| `HOTSTASH_TLS_KEY_FILE` | `--tls-key-file` | không có | Khóa riêng của server (PEM). |
+| `HOTSTASH_TLS_CA_CERT_FILE` | `--tls-ca-cert-file` | không có | CA mà chứng chỉ client phải thuộc về. |
+| `HOTSTASH_TLS_AUTH_CLIENTS` | `--tls-auth-clients` | `yes` khi có CA | `yes`, `optional` hoặc `no`. |
+| `HOTSTASH_MEMCACHED_PORT` | `--memcached-port` | tắt | Cổng cho giao thức text của Memcached (database 0). |
+| `HOTSTASH_METRICS_PORT` | `--metrics-port` | tắt | Cổng cho `GET /metrics` của Prometheus. |
+| `HOTSTASH_CLUSTER_ENABLED` | `--cluster-enabled` | `no` | `yes` trả lời như một Redis Cluster một nút. |
+| `HOTSTASH_CLUSTER_DATABASES` | `--cluster-databases` | `1` | Số database ở chế độ cluster. |
+| `HOTSTASH_ENABLE_DEBUG_COMMAND` | `--enable-debug-command` | `no` | `no`, `yes`, hoặc `local` (chỉ kết nối từ chính máy này). |
 
-Thiết lập nào `CONFIG SET` nhận thì cũng truyền được lúc khởi động theo cùng cách, ví dụ `HCACHE_NOTIFY_KEYSPACE_EVENTS=KEA`, `HCACHE_SLOWLOG_MAX_LEN=512`, `HCACHE_LAZYFREE_LAZY_USER_DEL=no`.
+Thiết lập nào `CONFIG SET` nhận thì cũng truyền được lúc khởi động theo cùng cách, ví dụ `HOTSTASH_NOTIFY_KEYSPACE_EVENTS=KEA`, `HOTSTASH_SLOWLOG_MAX_LEN=512`, `HOTSTASH_LAZYFREE_LAZY_USER_DEL=no`.
 
-Trong image Docker, dòng lệnh đã đặt sẵn `--bind 0.0.0.0 --data /data/hcache.aof`, nên `HCACHE_BIND` và `HCACHE_DATA` không có tác dụng ở đó trừ khi bạn thay lệnh. Các biến mà Kubernetes hay Docker link tự tạo cho service tên `hcache` (`HCACHE_SERVICE_*`, `HCACHE_PORT_*`, `HCACHE_PORT=tcp://...`) bị bỏ qua.
+Trong image Docker, dòng lệnh đã đặt sẵn `--bind 0.0.0.0 --data /data/hotstash.aof`, nên `HOTSTASH_BIND` và `HOTSTASH_DATA` không có tác dụng ở đó trừ khi bạn thay lệnh. Các biến mà Kubernetes hay Docker link tự tạo cho service tên `hotstash` (`HOTSTASH_SERVICE_*`, `HOTSTASH_PORT_*`, `HOTSTASH_PORT=tcp://...`) bị bỏ qua.
 
 ## Lệnh
 
@@ -84,7 +86,7 @@ cargo +stable-x86_64-pc-windows-msvc build --release --workspace
 Chạy server (mặc định `127.0.0.1:6379`, 64 shard):
 
 ```bash
-target/release/hcache-server --port 6400 --workers 4
+target/release/hotstash-server --port 6400 --workers 4
 ```
 
 Số database mặc định là 16; `--databases N` đổi (1 đến 256).
@@ -92,7 +94,7 @@ Số database mặc định là 16; `--databases N` đổi (1 đến 256).
 Đặt mật khẩu cho người dùng `default` qua biến môi trường (server xóa biến này khỏi tiến trình ngay sau khi đọc):
 
 ```bash
-HCACHE_REQUIREPASS='mật-khẩu-của-bạn' target/release/hcache-server --port 6400
+HOTSTASH_REQUIREPASS='mật-khẩu-của-bạn' target/release/hotstash-server --port 6400
 ```
 
 Tham số `--requirepass` cũng dùng được, nhưng người dùng khác trên cùng máy đọc được dòng lệnh. Server nghe ở địa chỉ không phải loopback mà không có mật khẩu thì in cảnh báo khi khởi động.
@@ -100,7 +102,7 @@ Tham số `--requirepass` cũng dùng được, nhưng người dùng khác trê
 Lưu đĩa và độ bền (cần `--data <tệp>`):
 
 ```bash
-target/release/hcache-server --port 6400 --data hcache.hc --appendfsync always
+target/release/hotstash-server --port 6400 --data hotstash.hc --appendfsync always
 ```
 
 | `--appendfsync` | Ý nghĩa | Mất gì khi máy sập |
@@ -113,8 +115,8 @@ target/release/hcache-server --port 6400 --data hcache.hc --appendfsync always
 
 Chọn cách chạy:
 
-- **Biến môi trường.** Mỗi cờ đều có biến `HCACHE_` cộng tên cờ viết hoa, gạch ngang thành gạch dưới: `HCACHE_WORKERS=4` là `--workers 4`, `HCACHE_HASH_TAGS=yes` là `--hash-tags`. Nếu cả hai cùng có thì dòng lệnh thắng. Biến để trống được coi như không đặt.
-- **Thiết lập lúc khởi động.** Mọi thiết lập mà `CONFIG SET` nhận đều đặt được bằng `--tên giá-trị` hoặc `HCACHE_TÊN=giá-trị`, ví dụ `--lazyfree-lazy-user-del no`, `--notify-keyspace-events KEA`, `HCACHE_SLOWLOG_MAX_LEN=512`. Giá trị sai thì server không khởi động. Tên sai trên dòng lệnh cũng vậy. Còn biến môi trường có tên lạ chỉ bị cảnh báo, vì có thể nó thuộc chương trình khác.
+- **Biến môi trường.** Mỗi cờ đều có biến `HOTSTASH_` cộng tên cờ viết hoa, gạch ngang thành gạch dưới: `HOTSTASH_WORKERS=4` là `--workers 4`, `HOTSTASH_HASH_TAGS=yes` là `--hash-tags`. Nếu cả hai cùng có thì dòng lệnh thắng. Biến để trống được coi như không đặt.
+- **Thiết lập lúc khởi động.** Mọi thiết lập mà `CONFIG SET` nhận đều đặt được bằng `--tên giá-trị` hoặc `HOTSTASH_TÊN=giá-trị`, ví dụ `--lazyfree-lazy-user-del no`, `--notify-keyspace-events KEA`, `HOTSTASH_SLOWLOG_MAX_LEN=512`. Giá trị sai thì server không khởi động. Tên sai trên dòng lệnh cũng vậy. Còn biến môi trường có tên lạ chỉ bị cảnh báo, vì có thể nó thuộc chương trình khác.
 - **Đơn luồng hay đa luồng.** `--workers 1` chạy mọi lệnh trên một luồng; số lớn hơn thì chia kết nối cho nhiều luồng. Không có chế độ luồng riêng cho từng database hay từng khóa; lý do nằm ở mục "Chọn cách chạy" của kế hoạch.
 - **Xóa bất đồng bộ.** `UNLINK`, cùng `FLUSHALL` và `FLUSHDB` với `ASYNC`, giải phóng giá trị lớn (trên 64 phần tử) ở một luồng nền thay vì bắt các client khác chờ. `DEL`, `FLUSHALL` không kèm tùy chọn, eviction, hết hạn và ghi đè làm theo năm thiết lập `lazyfree-lazy-user-del`, `-user-flush`, `-eviction`, `-expire`, `-server-del`, mặc định `yes` như Valkey. `INFO memory` có `lazyfree_pending_objects` và `lazyfreed_objects`.
 - **Độ bền theo từng lệnh.** Chạy `--appendfsync everysec` cho nhanh, rồi sau các lệnh ghi quan trọng gửi `WAITAOF 1 0 <ms>`: lệnh này trả `[1, 0]` khi mọi thay đổi trước nó đã nằm trên đĩa. `WAIT <n> <ms>` chờ đến khi `n` replica đã nhận mọi lệnh ghi trước nó (mục "Sao chép").
@@ -125,7 +127,7 @@ Thời hạn kết nối: `--timeout <giây>` (hoặc `CONFIG SET timeout`) đó
 TLS (chứng chỉ và khóa ở dạng PEM):
 
 ```bash
-target/release/hcache-server --port 6400 --tls-port 6401 --tls-cert-file server.crt --tls-key-file server.key
+target/release/hotstash-server --port 6400 --tls-port 6401 --tls-cert-file server.crt --tls-key-file server.key
 ```
 
 - `--port 0` cùng `--tls-port` thì chỉ nghe TLS.
@@ -139,14 +141,14 @@ Chạy trong container (Docker, Kubernetes, k3s):
 - `--thp off` là mặc định: tắt transparent huge pages cho tiến trình (`prctl`), như Redis và Valkey. `--thp inherit` để nguyên theo hệ thống. Đo trên WSL2 (THP kiểu `madvise`), 1 triệu khóa: để THP bật thì nhanh hơn 1,5 đến 2% nhưng tốn 180 byte mỗi khóa (RSS) thay vì 147.
 - `SIGTERM` hoặc `SIGINT`: server ngừng nhận kết nối, các worker dừng, mọi thay đổi được ghi và `fsync` xuống đĩa, rồi thoát với mã 0. Quá 20 giây thì thoát luôn với mã 1; tín hiệu thứ hai, hoặc tín hiệu đến khi đang nạp tệp dữ liệu, thì thoát ngay. Trên Windows server vẫn chạy đến khi bị tắt như cũ.
 - `--protected-mode yes` là mặc định: server từ chối khởi động nếu nghe ở địa chỉ không phải loopback mà không có mật khẩu (trước đây chỉ in cảnh báo). `--protected-mode no` để bỏ qua.
-- `hcache-server healthcheck [--port N]` thoát với mã 0 nếu server trên máy này trả lời `PING` (cả khi server đòi mật khẩu). Không có `--port` thì nó hỏi cổng trong `HCACHE_PORT`, không có nữa thì 6379. Dùng cho health check trong image không có shell.
+- `hotstash-server healthcheck [--port N]` thoát với mã 0 nếu server trên máy này trả lời `PING` (cả khi server đòi mật khẩu). Không có `--port` thì nó hỏi cổng trong `HOTSTASH_PORT`, không có nữa thì 6379. Dùng cho health check trong image không có shell.
 - `Dockerfile` (build trên Debian 13, chạy trên `gcr.io/distroless/cc-debian13:nonroot`, người dùng 65532, dữ liệu ở `/data`) và `deploy/k8s.yaml` (StatefulSet một bản, PVC, probe, `securityContext` theo mức restricted, request bằng limit). CI build image cho amd64 và arm64, kiểm từng bản khởi động, ghi và đọc một khóa, dừng gọn, rồi mới đăng lên. `deploy/k8s.yaml` chưa được chạy thử.
 
 ```bash
-docker build -t hcache .
+docker build -t hotstash .
 ```
 
-Build có PGO (Linux, cần component `llvm-tools` của rustup), ra `target/pgo/hcache-server`:
+Build có PGO (Linux, cần component `llvm-tools` của rustup), ra `target/pgo/hotstash-server`:
 
 ```bash
 bash bench/pgo_build.sh
@@ -168,9 +170,9 @@ target/release/spikeb --all
 
 | Crate | Nội dung |
 |---|---|
-| `hcache-core` | Bộ phân tích RESP, bảng lệnh, shard, cổng thực thi, engine, Lua |
-| `hcache-server` | Server TCP: vòng lặp sự kiện `mio`, một luồng riêng cho việc độc quyền |
-| `hcache` | Bản nhúng: `Db::open`, `Session::execute`, `Db::listen` |
+| `hotstash-core` | Bộ phân tích RESP, bảng lệnh, shard, cổng thực thi, engine, Lua |
+| `hotstash-server` | Server TCP: vòng lặp sự kiện `mio`, một luồng riêng cho việc độc quyền |
+| `hotstash` | Bản nhúng: `Db::open`, `Session::execute`, `Db::listen` |
 | `hload` | Công cụ phát tải cho bảy ca xấu; nói RESP thuần nên chạy được với cả Valkey |
 | `spikeb` | Spike B; kết quả ở [RESULTS.md](crates/spikeb/RESULTS.md) |
 
@@ -241,7 +243,7 @@ Bảng đối chiếu tính năng với Redis, Valkey và các cache khác, cùn
 
 ## Sao chép
 
-`REPLICAOF <host> <port>` (hay `SLAVEOF`) biến nút thành replica của một primary; `REPLICAOF NO ONE` đưa nó lên làm primary. Giao thức là của Redis và Valkey, nên primary và replica có thể là HCache hay Valkey theo cả hai chiều. Ngày 2026-11-16 đã chạy thật với Valkey 9.1.3: HCache làm replica của Valkey và ngược lại, có mật khẩu, có lệnh ghi trong lúc đồng bộ, cùng `valkey-cli --rdb` và `valkey-cli --replica` với HCache.
+`REPLICAOF <host> <port>` (hay `SLAVEOF`) biến nút thành replica của một primary; `REPLICAOF NO ONE` đưa nó lên làm primary. Giao thức là của Redis và Valkey, nên primary và replica có thể là Hotstash hay Valkey theo cả hai chiều. Ngày 2026-11-16 đã chạy thật với Valkey 9.1.3: Hotstash làm replica của Valkey và ngược lại, có mật khẩu, có lệnh ghi trong lúc đồng bộ, cùng `valkey-cli --rdb` và `valkey-cli --replica` với Hotstash.
 
 - Lần đầu replica nhận một tệp RDB rồi luồng lệnh ghi. Mất kết nối thì nó nối tiếp từ chỗ dừng, lấy phần thiếu trong backlog của primary (`repl-backlog-size`, mặc định 10 MiB); quá xa thì đồng bộ lại từ đầu. Replica của một replica cũng được.
 - Luồng gửi đi là kết quả của lệnh, như Redis từ 7.0: lệnh phụ thuộc đồng hồ hay số ngẫu nhiên đi dưới dạng trạng thái nó để lại (`PEXPIREAT`, `SET ... PXAT`, `RESTORE ... ABSTTL`), khóa hết hạn hay bị thu hồi đi dưới dạng `DEL`. `MULTI` và script đi trong một khối `MULTI`/`EXEC`.
@@ -251,7 +253,7 @@ Bảng đối chiếu tính năng với Redis, Valkey và các cache khác, cùn
 - `FAILOVER [TO <host> <port>] [TIMEOUT <ms>] [FORCE]` và `FAILOVER ABORT` như Valkey: primary dừng nhận lệnh ghi (lệnh đọc vẫn chạy), chờ replica theo kịp, trao vai primary bằng `PSYNC ... FAILOVER` rồi tự làm replica của nút mới. Kết nối đang chờ (`BLPOP`…) nhận lỗi `UNBLOCKED`. Hết giờ mà không có `FORCE` thì hủy; `INFO replication` có `master_failover_state`.
 - `ROLE` và `INFO replication` trả các trường như Redis; `CLIENT KILL TYPE master`/`replica` cắt liên kết.
 
-**Sentinel.** Valkey Sentinel 9.1.3 thật quản lý được nhóm nút HCache trọn vòng (2026-11-17): phát hiện, failover tự động khi primary chết, đưa primary cũ về làm replica khi nó chạy lại, `SENTINEL FAILOVER` và `SENTINEL FAILOVER ... COORDINATED`. Cùng kịch bản với nút Valkey cho kết quả và thời gian như nhau. Những gì Sentinel cần đều có:
+**Sentinel.** Valkey Sentinel 9.1.3 thật quản lý được nhóm nút Hotstash trọn vòng (2026-11-17): phát hiện, failover tự động khi primary chết, đưa primary cũ về làm replica khi nó chạy lại, `SENTINEL FAILOVER` và `SENTINEL FAILOVER ... COORDINATED`. Cùng kịch bản với nút Valkey cho kết quả và thời gian như nhau. Những gì Sentinel cần đều có:
 - khối đổi vai `MULTI`/`SLAVEOF`/`CONFIG REWRITE`/`CLIENT KILL`/`EXEC` chạy được trong giao dịch;
 - `INFO` có `run_id` và nhận tên mục;
 - `replica-priority`, `replica-announced`;
@@ -263,10 +265,10 @@ Chưa có: đồng bộ không qua đĩa theo kiểu tùy chọn của Redis, `r
 
 ## Cổng Memcached
 
-`--memcached-port N` (hoặc `HCACHE_MEMCACHED_PORT`) mở thêm một cổng nói giao thức văn bản của Memcached, trên cùng địa chỉ `--bind`:
+`--memcached-port N` (hoặc `HOTSTASH_MEMCACHED_PORT`) mở thêm một cổng nói giao thức văn bản của Memcached, trên cùng địa chỉ `--bind`:
 
 ```bash
-target/release/hcache-server --port 6400 --memcached-port 11211
+target/release/hotstash-server --port 6400 --memcached-port 11211
 ```
 
 - **Lệnh:** `set`, `add`, `replace`, `append`, `prepend`, `cas`, `get`, `gets`, `gat`, `gats`, `delete`, `incr`, `decr`, `touch`, `flush_all` (cả dạng hẹn giờ), `version`, `verbosity`, `stats` (và `stats reset`), `quit`, cùng các lệnh meta `mg`, `ms`, `md`, `ma`, `mn`. Câu trả lời, kể cả câu báo lỗi, giống memcached 1.6.24 từng byte.
@@ -275,16 +277,16 @@ target/release/hcache-server --port 6400 --memcached-port 11211
 - **Đăng nhập và quyền:** khi `default` có mật khẩu, kết nối phải đăng nhập như với `memcached -Y`: một lệnh `set` bất kỳ mà giá trị là `<tên> <mật khẩu>`. Người dùng và quyền là của ACL: `get` bị kiểm như `GET`, `delete` như `DEL`, `flush_all` như `FLUSHDB`; `stats` như `INFO`, `stats reset` như `CONFIG RESETSTAT`; bị từ chối thì nhận `SERVER_ERROR NOPERM ...`. Xóa người dùng thì kết nối của họ bị đóng. Một `flush_all` hẹn giờ chỉ chạy nếu đến giờ người hẹn vẫn còn và vẫn có quyền `FLUSHDB`. Kết nối phải đăng nhập mà sau 10 giây chưa đăng nhập thì bị đóng, để những kết nối không bao giờ đăng nhập không chiếm hết chỗ.
 - **Không có TLS:** cổng này chỉ nói văn bản thường, nên `--memcached-port` bị từ chối khi khởi động nếu đi cùng `--port 0` (server chỉ nhận TLS); nếu không, cổng này sẽ thành đường vòng qua TLS.
 - **Sao chép và độ bền:** lệnh ghi qua cổng này đi vào tệp dữ liệu, theo `appendfsync`, và sang replica như lệnh RESP. Trên replica, lệnh ghi nhận `SERVER_ERROR READONLY ...`; trong lúc `FAILOVER` thì chờ.
-- **Kiểm thử:** `tests/memcached.rs` (9 test); một bộ so sánh gửi 311 yêu cầu (và 27 yêu cầu đăng nhập) tới memcached 1.6.24 thật và tới HCache, câu trả lời giống hệt; thư viện pymemcache 4.0 chạy cùng một kịch bản 45 bước trên cả hai, kết quả giống nhau.
+- **Kiểm thử:** `tests/memcached.rs` (9 test); một bộ so sánh gửi 311 yêu cầu (và 27 yêu cầu đăng nhập) tới memcached 1.6.24 thật và tới Hotstash, câu trả lời giống hệt; thư viện pymemcache 4.0 chạy cùng một kịch bản 45 bước trên cả hai, kết quả giống nhau.
 
 Khác memcached:
 
 - Chưa có giao thức nhị phân, UDP, SASL, lệnh `me`, `lru_crawler`, `slabs`, `watch`. `stats` chỉ có các mục cơ bản; `stats settings`, `items`, `slabs`, `sizes`, `conns` trả rỗng.
 - Cờ meta chưa có: `h`, `l`, `x`, `E`, `R`, `N` của `ms`, `I` của `md`. Dùng chúng thì nhận `CLIENT_ERROR invalid flag`.
-- Exptime lớn hơn 2^31: memcached cắt về 32 bit, HCache giữ nguyên (trần 2^40).
-- Đăng nhập: mật khẩu là toàn bộ phần sau dấu cách đầu tiên, như memcached 1.6.45; memcached 1.6.24 chỉ lấy từ thứ hai. Trước khi đăng nhập, memcached chỉ giữ câu trả lời cuối của nhiều lệnh gửi liền nhau; HCache trả lời từng lệnh. Kết nối chưa đăng nhập sau 10 giây thì bị đóng; memcached không đặt hạn. Đăng nhập sai không đóng kết nối và không bị làm chậm, như memcached và như `AUTH` của RESP.
+- Exptime lớn hơn 2^31: memcached cắt về 32 bit, Hotstash giữ nguyên (trần 2^40).
+- Đăng nhập: mật khẩu là toàn bộ phần sau dấu cách đầu tiên, như memcached 1.6.45; memcached 1.6.24 chỉ lấy từ thứ hai. Trước khi đăng nhập, memcached chỉ giữ câu trả lời cuối của nhiều lệnh gửi liền nhau; Hotstash trả lời từng lệnh. Kết nối chưa đăng nhập sau 10 giây thì bị đóng; memcached không đặt hạn. Đăng nhập sai không đóng kết nối và không bị làm chậm, như memcached và như `AUTH` của RESP.
 - `flush_all` xóa cả database 0, kể cả khóa do RESP ghi. Một `flush_all` hẹn giờ chỉ nằm trong bộ nhớ: server khởi động lại trước giờ đó thì nó mất.
-- Bộ nhớ theo `maxmemory` và chính sách thu hồi của HCache, không có slab. Giá trị tối đa 1 MiB (như `-I 1m` mặc định), khóa tối đa 250 byte.
+- Bộ nhớ theo `maxmemory` và chính sách thu hồi của Hotstash, không có slab. Giá trị tối đa 1 MiB (như `-I 1m` mặc định), khóa tối đa 250 byte.
 - Mỗi kết nối có một luồng riêng.
 
 ## Bloom và JSON
@@ -298,24 +300,24 @@ Hai họ lệnh này có sẵn trong server, không cần nạp module. Chúng t
   
   Mô tả hành vi theo từng mục ở [docs/bloom-spec.md](docs/bloom-spec.md).
 - **JSON (`JSON.*`):** cả cú pháp đường dẫn cũ (`.a.b`) lẫn JSONPath (`$..a[?(@.x>1)]`). Tập con JSONPath được hỗ trợ, các giới hạn và mọi chỗ khác valkey-json ghi ở [docs/json-path.md](docs/json-path.md). Thiết lập: `json.max-document-size` (byte; mặc định 0 là không giới hạn) và `json.max-path-limit` (độ lồng, mặc định 128). `tests/json_upstream.rs` (151 test) là bộ test Python của valkey-json chuyển sang Rust. Bốn giới hạn valkey-json không có, thêm sau lượt rà bảo mật: công sức của một lần tìm theo đường (`..` lồng nhau), câu trả lời `JSON.GET` tối đa 512 MiB, một lệnh ghi thêm tối đa 512 MiB kể cả các bản sao ở mọi chỗ khớp, và số vượt số thực lớn nhất bị từ chối như RapidJSON. `BF.LOAD` từ client nhận tối đa 4096 filter con.
-- **Tệp RDB và sao chép:** khóa Bloom và JSON được ghi vào RDB dưới kiểu module của valkey-bloom (`bloomfltr`, bản mã hóa 1) và valkey-json (`ReJSON-RL`, bản 3). Vì vậy một Valkey làm replica của HCache, hoặc đọc tệp RDB của HCache, phải nạp hai module đó. Định dạng viết theo mã nguồn của module, chưa đối chiếu với tệp do module thật ghi.
+- **Tệp RDB và sao chép:** khóa Bloom và JSON được ghi vào RDB dưới kiểu module của valkey-bloom (`bloomfltr`, bản mã hóa 1) và valkey-json (`ReJSON-RL`, bản 3). Vì vậy một Valkey làm replica của Hotstash, hoặc đọc tệp RDB của Hotstash, phải nạp hai module đó. Định dạng viết theo mã nguồn của module, chưa đối chiếu với tệp do module thật ghi.
 
 ## Prometheus và Helm
 
-`--metrics-port N` (hoặc `HCACHE_METRICS_PORT`) mở một cổng HTTP trên cùng địa chỉ `--bind`:
+`--metrics-port N` (hoặc `HOTSTASH_METRICS_PORT`) mở một cổng HTTP trên cùng địa chỉ `--bind`:
 - `GET /metrics` trả số liệu của `INFO` dưới đúng tên và dạng mà redis_exporter dùng, nên dashboard và cảnh báo làm cho redis_exporter dùng được nguyên.
 - Khi người dùng `default` có mật khẩu, cổng này đòi HTTP Basic với người dùng và mật khẩu của RESP, và người dùng phải có quyền `INFO`.
 - Mỗi kết nối hỏi một lần rồi bị đóng.
 
 ```bash
-target/release/hcache-server --port 6400 --metrics-port 9121
+target/release/hotstash-server --port 6400 --metrics-port 9121
 ```
 
-`deploy/helm/hcache` là một Helm chart tối giản gồm:
+`deploy/helm/hotstash` là một Helm chart tối giản gồm:
 - StatefulSet một bản, PVC và Service;
 - Secret mật khẩu, tự tạo từ `auth.password` hoặc lấy `auth.existingSecret` có sẵn;
 - cổng metrics 9121, cùng ServiceMonitor tùy chọn cho Prometheus Operator;
-- NetworkPolicy chỉ cho pod có nhãn `hcache-client: "true"` nối vào RESP, và chỉ pod trong namespace `monitoring` nối vào cổng metrics;
+- NetworkPolicy chỉ cho pod có nhãn `hotstash-client: "true"` nối vào RESP, và chỉ pod trong namespace `monitoring` nối vào cổng metrics;
 - `securityContext` theo mức restricted.
 
 Cổng metrics nhận mật khẩu qua HTTP Basic không mã hóa. Mặc định ServiceMonitor dùng người dùng `default`, có mọi quyền. Nên tạo một người dùng chỉ đọc được `INFO` (`ACL SETUSER metrics on >MẬT_KHẨU -@all +info`, được lưu trong tệp dữ liệu) rồi đặt Secret của nó vào `metrics.serviceMonitor.authSecret`. Đổi mật khẩu xong phải `kubectl rollout restart` pod: chart không còn ghi mã băm của mật khẩu vào annotation của pod, vì người đọc được pod thường nhiều hơn người đọc được Secret, và mã băm ngắn không có muối thì dò ngược được.
@@ -335,50 +337,50 @@ Việc độc quyền (`EVAL`, `FLUSHALL`, lệnh nhiều khóa bị leo thang) 
 
 ## Bộ test
 
-Cuối ngày 2026-11-17, sau đợt 3, cả bộ có 1041 test (thêm 4 test bỏ qua theo mặc định). Trên Windows cả 1041 đều đạt. Trên Linux (WSL2) 1040 đạt; test mô hình ngẫu nhiên của `collections.rs` trượt một lần vì đồng hồ thực của WSL nhảy khoảng 23,7 giây giữa lúc chạy (engine tính TTL theo đồng hồ thực, mô hình trong test theo đồng hồ monotonic), chạy lại riêng ba lần đều đạt. `clippy -D warnings` và `rustfmt` sạch. Đợt 3 thêm `metrics.rs`, `bloom.rs`, `json.rs`, `json_upstream.rs` và `sentinel.rs`. Trước đó, cũng ngày 2026-11-17, cả bộ có 818 test, đều đạt trên hai hệ. Đợt bù tính năng thêm `valkey9.rs` (lệnh mới của Valkey 9 so với bản ghi lấy từ Valkey 9.1.3 thật), `cluster.rs` (cluster một node và lệnh vận hành), `rdb.rs` (tệp RDB, kể cả tệp hỏng ngẫu nhiên), `replication.rs` (sao chép và `FAILOVER`) và `memcached.rs` (cổng Memcached). Ngày 2026-11-16 có 710 test, đều đạt trên Windows và Linux. Trong đó `durability.rs` (25 test) kiểm ba chế độ `appendfsync` (đọc lại đúng tệp trên đĩa ngay sau khi lệnh được trả lời), `SAVE`, hàm Lua và người dùng ACL qua khởi động lại, qua lần ghi lại tệp và khi tệp bị cắt cụt, `CLIENT KILL` với mọi bộ lọc, thời hạn kết nối rảnh và client không đọc; `tls.rs` (17 test) kiểm TLS: giá trị 9 MiB và pipeline dài, gói tin vụn, dữ liệu không phải TLS, bắt tay dở dang, chứng chỉ client đúng, sai và thiếu, client biến mất giữa chừng; `p2.rs` (39 test) kiểm nhóm P2: `BITFIELD` so với mô hình từng bit, GEO so với công thức haversine tính thẳng, `SORT`, `SWAPDB` (kể cả `WATCH`, người chờ, khởi động lại), `SLOWLOG`, `MONITOR`, `CLIENT TRACKING` qua RESP3; `p1.rs` (28 test) kiểm nhóm P1: thời hạn của field, HyperLogLog, `DUMP`/`RESTORE` với payload hỏng, thông báo keyspace, `MEMORY USAGE`, `LCS`, `FUNCTION`; `databases.rs` (13 test) kiểm nhiều database, `auth.rs` (17 test) kiểm xác thực và ACL, `hardening.rs` (6 test) kiểm các lỗi mà lượt rà bảo mật tìm ra.
+Ngày 2026-11-18, sau đợt đối chiếu với Valkey, cả bộ có 1055 test (thêm 4 test bỏ qua theo mặc định), đều đạt trên Windows và trên Linux (WSL2); `clippy -D warnings` và `rustfmt` sạch. Đợt này dùng một fuzzer gửi cùng chuỗi lệnh ngẫu nhiên tới Hotstash và Valkey 9.1.3 rồi so từng câu trả lời. Fuzzer chạy qua chuỗi, bit, hash, list, set, sorted set, HyperLogLog, `SORT` và `LCS`, với các giá trị dễ gây lỗi như `-0`, `nan`, `1e300`, số hex và chuỗi rỗng. Lần chạy đầu ra 20 loại khác biệt. Loại nào cũng đã sửa và có test dựng từ câu trả lời của Valkey. Nay tám seed, cộng 288 000 lệnh, không còn khác biệt nào. Fuzzer chưa có trong repo. Đồng hồ thực của WSL2 có lúc nhảy hơn 10 giây; khi đó test so TTL (theo đồng hồ thực) với đồng hồ monotonic có thể trượt một lần, và lần nào chạy lại cũng đạt. Trước đó, cuối ngày 2026-11-17, sau đợt 3, cả bộ có 1041 test. Đợt 3 thêm `metrics.rs`, `bloom.rs`, `json.rs`, `json_upstream.rs` và `sentinel.rs`. Trước đó, cũng ngày 2026-11-17, cả bộ có 818 test, đều đạt trên hai hệ. Đợt bù tính năng thêm `valkey9.rs` (lệnh mới của Valkey 9 so với bản ghi lấy từ Valkey 9.1.3 thật), `cluster.rs` (cluster một node và lệnh vận hành), `rdb.rs` (tệp RDB, kể cả tệp hỏng ngẫu nhiên), `replication.rs` (sao chép và `FAILOVER`) và `memcached.rs` (cổng Memcached). Ngày 2026-11-16 có 710 test, đều đạt trên Windows và Linux. Trong đó `durability.rs` (25 test) kiểm ba chế độ `appendfsync` (đọc lại đúng tệp trên đĩa ngay sau khi lệnh được trả lời), `SAVE`, hàm Lua và người dùng ACL qua khởi động lại, qua lần ghi lại tệp và khi tệp bị cắt cụt, `CLIENT KILL` với mọi bộ lọc, thời hạn kết nối rảnh và client không đọc; `tls.rs` (17 test) kiểm TLS: giá trị 9 MiB và pipeline dài, gói tin vụn, dữ liệu không phải TLS, bắt tay dở dang, chứng chỉ client đúng, sai và thiếu, client biến mất giữa chừng; `p2.rs` (39 test) kiểm nhóm P2: `BITFIELD` so với mô hình từng bit, GEO so với công thức haversine tính thẳng, `SORT`, `SWAPDB` (kể cả `WATCH`, người chờ, khởi động lại), `SLOWLOG`, `MONITOR`, `CLIENT TRACKING` qua RESP3; `p1.rs` (28 test) kiểm nhóm P1: thời hạn của field, HyperLogLog, `DUMP`/`RESTORE` với payload hỏng, thông báo keyspace, `MEMORY USAGE`, `LCS`, `FUNCTION`; `databases.rs` (13 test) kiểm nhiều database, `auth.rs` (17 test) kiểm xác thực và ACL, `hardening.rs` (6 test) kiểm các lỗi mà lượt rà bảo mật tìm ra.
 
 Test được viết để tìm lỗi: đối chiếu với mô hình tham chiếu bằng dữ liệu ngẫu nhiên, cắt gói tin ở mọi vị trí, đầu vào hỏng, nhiều luồng tranh nhau, script chạy vô hạn, tắt server giữa chừng.
 
 | Tệp | Kiểm gì |
 |---|---|
-| `hcache-core/tests/resp.rs` | Bộ phân tích: cắt gói ở mọi byte, số âm, số quá lớn, lệnh inline, fuzz |
-| `hcache-core/tests/dict.rs`, `glob.rs` | Bảng băm so với mô hình; mẫu glob kể cả mẫu gây bùng nổ |
-| `hcache/tests/model.rs` | Mọi lệnh so với một mô hình tham chiếu đơn luồng |
-| `hcache/tests/concurrency.rs` | Tính nguyên tử của lệnh nhiều khóa, không lệnh nào bị bỏ quên trong hàng đợi |
-| `hcache/tests/script.rs` | Hộp cát Lua, giới hạn bộ nhớ, `SCRIPT KILL`, script lỗi |
-| `hcache/tests/tcp.rs` | Server thật qua socket: pipeline lớn, client chậm, ngắt giữa chừng, tắt server |
-| `hcache/tests/memory.rs` | Kết nối trả lại bộ nhớ sau một yêu cầu và một trả lời 48 MiB (tệp riêng để không test nào khác cấp phát lúc đo) |
-| `hcache/tests/mixed.rs` | Bản nhúng và TCP dùng chung một dữ liệu |
-| `hcache/tests/expiry.rs` | Thời hạn, tùy chọn của `SET`, `SCAN`/`HSCAN`, `MULTI`/`EXEC`/`WATCH`: so với mô hình có đồng hồ ảo, giá trị biên, nhiều luồng tranh nhau |
-| `hcache/tests/expiry_tcp.rs` | Các phần trên qua socket: RESP2 và RESP3, ngắt kết nối giữa `MULTI`, pipeline vượt trần, quét nền |
-| `hcache/tests/compat.rs` | Những gì thư viện client thật gửi: `HELLO` với phiên bản sai, RESP3, `EVALSHA`, `SCRIPT LOAD/EXISTS/FLUSH`, bảng script đầy |
-| `hcache/tests/collections.rs`, `coll_smoke.rs` | List, set, sorted set, hash: so với mô hình, giá trị biên, nhiều luồng |
-| `hcache/tests/extras.rs` | Phép toán trên sorted set, khoảng theo từ điển, bitmap so với mô hình, `EVAL_RO`, lệnh nhiều khóa qua nhiều shard |
-| `hcache/tests/pubsub.rs` | Pub/sub qua socket, kể cả người đăng ký chậm và ngắt kết nối |
-| `hcache/tests/eviction.rs` | `maxmemory` với tám chính sách, kể cả LFU |
-| `hcache/tests/p2.rs` | Nhóm P2: `BITFIELD`, GEO, `SORT`, `SWAPDB`, `SLOWLOG`, `LATENCY`, `MONITOR`, `OBJECT FREQ`, `CLIENT TRACKING` (mọi chế độ, đua giữa đọc và ghi, người dùng bị giới hạn) |
-| `hcache/tests/persist.rs` | Tệp dữ liệu: khởi động lại, cắt tệp ở mọi vị trí, tệp hỏng, sao chép lúc đang ghi |
-| `hcache/tests/blocking.rs` | Lệnh chờ: thứ tự người chờ, hết giờ, người chờ biến mất, nhiều người chờ nhiều khóa |
-| `hcache/tests/streams.rs` | Stream qua socket: `XREAD`/`XREADGROUP` có và không `BLOCK`, nhóm tiêu thụ dưới tải (không mất, không lặp), tệp dữ liệu, nhiều kiểu người chờ trên một khóa |
-| `hcache-core/src/stream.rs` (test đơn vị) | Stream so với mô hình ngẫu nhiên, ID ở biên `u64`, giải mã dữ liệu hỏng |
-| `hcache/tests/resp3_shapes.rs` | Kiểu trả lời RESP2 và RESP3, đúng từng byte |
-| `hcache/tests/conn_cmds.rs` | `CLIENT`, `RESET`, các mục của `INFO` |
-| `hcache/tests/sentinel.rs` | Những gì Sentinel gửi: khối đổi vai trong `MULTI`, failover `COORDINATED` (`CLIENT PAUSE` và `FAILOVER` trong một `EXEC`), `INFO` có `run_id` và theo mục, `replica-priority`, `CLIENT PAUSE WRITE`/`ALL`, `CONFIG REWRITE` |
-| `hcache/tests/metrics.rs` | Cổng `/metrics`: tên theo redis_exporter, HTTP Basic khi có mật khẩu và quyền `INFO`, chỉ phục vụ `GET`/`HEAD /metrics`, client im lặng bị ngắt mà không chặn người khác |
-| `hcache/tests/bloom.rs` | `BF.*`: câu trả lời như valkey-bloom, mở rộng filter, thiết lập `bf.*`, `BF.LOAD` của filter valkey-bloom ghi, `DUMP`/`RESTORE`, RDB, tệp dữ liệu, sao chép, thông báo keyspace |
-| `hcache/tests/json.rs`, `json_upstream.rs` | `JSON.*`: kiểu khóa riêng, lỗi trong `MULTI`, `DUMP`/`RESTORE`, RDB, tệp dữ liệu, sao chép, thông báo keyspace; bộ test Python của valkey-json (151 test) chuyển sang Rust |
-| `hcache/tests/script_libs.rs` | `cjson`, `cmsgpack`, `struct`, `bit` trong Lua: đáp án đã biết, dữ liệu hỏng, lồng sâu, giới hạn bộ nhớ |
-| `hcache/tests/valkey9.rs` | `HGETDEL`, `HGETEX`, `HSETEX`, `DELIFEQ`, `MSETEX`, `SET IFEQ`, pub/sub theo shard: câu trả lời, sự kiện keyspace và byte trên dây so với bản ghi từ Valkey 9.1.3 |
-| `hcache/tests/cluster.rs` | Cluster một node (`CROSSSLOT`, `CLUSTER ...`), `ROLE`, `COMMANDLOG`, `DEBUG`, `SHUTDOWN`, `LOLWUT` |
-| `hcache/tests/rdb.rs` | Tệp RDB: mọi kiểu dữ liệu, thư viện hàm, tệp của Valkey, tệp hỏng ngẫu nhiên không làm panic và không nạp dở |
-| `hcache/tests/replication.rs` | Sao chép: đồng bộ, nối tiếp sau khi đứt, replica của replica, mật khẩu, `SYNC`/`PSYNC`, `FAILOVER` (chờ, hủy, `FORCE`, hết giờ) |
-| `hcache/tests/memcached.rs` | Cổng Memcached: dùng chung dữ liệu với RESP, CAS, `incr` từ nhiều client, lệnh meta, `noreply`, đăng nhập và ACL, replica, trần kết nối, `flush_all` hẹn giờ |
+| `hotstash-core/tests/resp.rs` | Bộ phân tích: cắt gói ở mọi byte, số âm, số quá lớn, lệnh inline, fuzz |
+| `hotstash-core/tests/dict.rs`, `glob.rs` | Bảng băm so với mô hình; mẫu glob kể cả mẫu gây bùng nổ |
+| `hotstash/tests/model.rs` | Mọi lệnh so với một mô hình tham chiếu đơn luồng |
+| `hotstash/tests/concurrency.rs` | Tính nguyên tử của lệnh nhiều khóa, không lệnh nào bị bỏ quên trong hàng đợi |
+| `hotstash/tests/script.rs` | Hộp cát Lua, giới hạn bộ nhớ, `SCRIPT KILL`, script lỗi |
+| `hotstash/tests/tcp.rs` | Server thật qua socket: pipeline lớn, client chậm, ngắt giữa chừng, tắt server |
+| `hotstash/tests/memory.rs` | Kết nối trả lại bộ nhớ sau một yêu cầu và một trả lời 48 MiB (tệp riêng để không test nào khác cấp phát lúc đo) |
+| `hotstash/tests/mixed.rs` | Bản nhúng và TCP dùng chung một dữ liệu |
+| `hotstash/tests/expiry.rs` | Thời hạn, tùy chọn của `SET`, `SCAN`/`HSCAN`, `MULTI`/`EXEC`/`WATCH`: so với mô hình có đồng hồ ảo, giá trị biên, nhiều luồng tranh nhau |
+| `hotstash/tests/expiry_tcp.rs` | Các phần trên qua socket: RESP2 và RESP3, ngắt kết nối giữa `MULTI`, pipeline vượt trần, quét nền |
+| `hotstash/tests/compat.rs` | Những gì thư viện client thật gửi: `HELLO` với phiên bản sai, RESP3, `EVALSHA`, `SCRIPT LOAD/EXISTS/FLUSH`, bảng script đầy |
+| `hotstash/tests/collections.rs`, `coll_smoke.rs` | List, set, sorted set, hash: so với mô hình, giá trị biên, nhiều luồng |
+| `hotstash/tests/extras.rs` | Phép toán trên sorted set, khoảng theo từ điển, bitmap so với mô hình, `EVAL_RO`, lệnh nhiều khóa qua nhiều shard |
+| `hotstash/tests/pubsub.rs` | Pub/sub qua socket, kể cả người đăng ký chậm và ngắt kết nối |
+| `hotstash/tests/eviction.rs` | `maxmemory` với tám chính sách, kể cả LFU |
+| `hotstash/tests/p2.rs` | Nhóm P2: `BITFIELD`, GEO, `SORT`, `SWAPDB`, `SLOWLOG`, `LATENCY`, `MONITOR`, `OBJECT FREQ`, `CLIENT TRACKING` (mọi chế độ, đua giữa đọc và ghi, người dùng bị giới hạn) |
+| `hotstash/tests/persist.rs` | Tệp dữ liệu: khởi động lại, cắt tệp ở mọi vị trí, tệp hỏng, sao chép lúc đang ghi |
+| `hotstash/tests/blocking.rs` | Lệnh chờ: thứ tự người chờ, hết giờ, người chờ biến mất, nhiều người chờ nhiều khóa |
+| `hotstash/tests/streams.rs` | Stream qua socket: `XREAD`/`XREADGROUP` có và không `BLOCK`, nhóm tiêu thụ dưới tải (không mất, không lặp), tệp dữ liệu, nhiều kiểu người chờ trên một khóa |
+| `hotstash-core/src/stream.rs` (test đơn vị) | Stream so với mô hình ngẫu nhiên, ID ở biên `u64`, giải mã dữ liệu hỏng |
+| `hotstash/tests/resp3_shapes.rs` | Kiểu trả lời RESP2 và RESP3, đúng từng byte |
+| `hotstash/tests/conn_cmds.rs` | `CLIENT`, `RESET`, các mục của `INFO` |
+| `hotstash/tests/sentinel.rs` | Những gì Sentinel gửi: khối đổi vai trong `MULTI`, failover `COORDINATED` (`CLIENT PAUSE` và `FAILOVER` trong một `EXEC`), `INFO` có `run_id` và theo mục, `replica-priority`, `CLIENT PAUSE WRITE`/`ALL`, `CONFIG REWRITE` |
+| `hotstash/tests/metrics.rs` | Cổng `/metrics`: tên theo redis_exporter, HTTP Basic khi có mật khẩu và quyền `INFO`, chỉ phục vụ `GET`/`HEAD /metrics`, client im lặng bị ngắt mà không chặn người khác |
+| `hotstash/tests/bloom.rs` | `BF.*`: câu trả lời như valkey-bloom, mở rộng filter, thiết lập `bf.*`, `BF.LOAD` của filter valkey-bloom ghi, `DUMP`/`RESTORE`, RDB, tệp dữ liệu, sao chép, thông báo keyspace |
+| `hotstash/tests/json.rs`, `json_upstream.rs` | `JSON.*`: kiểu khóa riêng, lỗi trong `MULTI`, `DUMP`/`RESTORE`, RDB, tệp dữ liệu, sao chép, thông báo keyspace; bộ test Python của valkey-json (151 test) chuyển sang Rust |
+| `hotstash/tests/script_libs.rs` | `cjson`, `cmsgpack`, `struct`, `bit` trong Lua: đáp án đã biết, dữ liệu hỏng, lồng sâu, giới hạn bộ nhớ |
+| `hotstash/tests/valkey9.rs` | `HGETDEL`, `HGETEX`, `HSETEX`, `DELIFEQ`, `MSETEX`, `SET IFEQ`, pub/sub theo shard: câu trả lời, sự kiện keyspace và byte trên dây so với bản ghi từ Valkey 9.1.3 |
+| `hotstash/tests/cluster.rs` | Cluster một node (`CROSSSLOT`, `CLUSTER ...`), `ROLE`, `COMMANDLOG`, `DEBUG`, `SHUTDOWN`, `LOLWUT` |
+| `hotstash/tests/rdb.rs` | Tệp RDB: mọi kiểu dữ liệu, thư viện hàm, tệp của Valkey, tệp hỏng ngẫu nhiên không làm panic và không nạp dở |
+| `hotstash/tests/replication.rs` | Sao chép: đồng bộ, nối tiếp sau khi đứt, replica của replica, mật khẩu, `SYNC`/`PSYNC`, `FAILOVER` (chờ, hủy, `FORCE`, hết giờ) |
+| `hotstash/tests/memcached.rs` | Cổng Memcached: dùng chung dữ liệu với RESP, CAS, `incr` từ nhiều client, lệnh meta, `noreply`, đăng nhập và ACL, replica, trần kết nối, `flush_all` hẹn giờ |
 
 ## Test bằng thư viện client thật
 
 Thư mục `clients/` có năm dự án nhỏ, mỗi dự án chạy cùng một bộ 38 đến 43 phép kiểm qua một thư viện Redis phổ biến: chuỗi, hash, list, set, sorted set, giao dịch, thời hạn, `SCAN`, script, pub/sub. Bộ của Python có thêm một phép kiểm stream và lệnh chờ, và một phép kiểm nhiều database, đăng nhập bằng người dùng ACL và `COMMAND`, và một phép kiểm nhóm P1 (thời hạn field, HyperLogLog, `DUMP`/`RESTORE`, `LCS`, `FUNCTION`/`FCALL`, thông báo keyspace), và một phép kiểm nhóm P2 (GEO, `BITFIELD`, `SORT`, `SWAPDB`, `SLOWLOG`, `OBJECT FREQ`, `MONITOR`, `CLIENT TRACKING` với `REDIRECT`), và một phép kiểm `appendfsync`, `SAVE`, `CLIENT KILL`.
 
-Chạy server ở cổng 6400 trước (lệnh ở mục "Lệnh"). Biến `HCACHE_PORT` đổi cổng; `HCACHE_PROTO=2` hoặc `3` ép giao thức, để trống thì thư viện tự bắt tay theo mặc định của nó. Riêng bộ Python chạy được qua TLS: đặt `HCACHE_TLS_CA` là đường dẫn tới chứng chỉ CA và `HCACHE_PORT` là cổng TLS. Chứng chỉ thử nghiệm nằm ở `crates/hcache/tests/tls/` (tự ký, chỉ để test, không dùng cho việc gì khác).
+Chạy server ở cổng 6400 trước (lệnh ở mục "Lệnh"). Biến `HOTSTASH_PORT` đổi cổng; `HOTSTASH_PROTO=2` hoặc `3` ép giao thức, để trống thì thư viện tự bắt tay theo mặc định của nó. Riêng bộ Python chạy được qua TLS: đặt `HOTSTASH_TLS_CA` là đường dẫn tới chứng chỉ CA và `HOTSTASH_PORT` là cổng TLS. Chứng chỉ thử nghiệm nằm ở `crates/hotstash/tests/tls/` (tự ký, chỉ để test, không dùng cho việc gì khác).
 
 | Thư viện | Thư mục | Lệnh chạy (trong thư mục đó) | RESP2 | RESP3 |
 |---|---|---|---|---|
@@ -411,9 +413,9 @@ Mỗi ô chỉ đo một lần, chưa lặp lại để lấy độ dao động.
 
 ## Spike A, lượt đầu trên WSL2 (so với Valkey 9.1.3)
 
-Đo ngày 2026-11-16 trong WSL2 (Ubuntu 24.04, nhân 6.6, 8 vCPU của i7-9700K, 8 GB RAM). Valkey 9.1.3 build từ mã nguồn, chạy với `--io-threads` bằng số nhân. HCache chạy với `--workers` bằng số nhân. Cả hai ghi log với `appendfsync everysec`; Valkey fsync mỗi giây, HCache mỗi 100 ms (mặc định của `--sync-interval-ms`), tức HCache chịu điều kiện chặt hơn. Server được ghim vào N vCPU đầu bằng `taskset`, `hload` chạy trên các vCPU còn lại. `hload baseline`: 64 kết nối, 10% lệnh ghi, 100 000 khóa, giá trị 64 byte, 10 giây mỗi ô. Mỗi ô chạy 3 lần, mỗi lần trên một server mới. Bảng ghi trung vị, đơn vị lệnh/giây, trong ngoặc là p99. Kịch bản đo: `bench/spike_a_wsl.sh`; số thô: `bench/results/2026-11-16-wsl2-grid.txt`.
+Đo ngày 2026-11-16 trong WSL2 (Ubuntu 24.04, nhân 6.6, 8 vCPU của i7-9700K, 8 GB RAM). Valkey 9.1.3 build từ mã nguồn, chạy với `--io-threads` bằng số nhân. Hotstash chạy với `--workers` bằng số nhân. Cả hai ghi log với `appendfsync everysec`; Valkey fsync mỗi giây, Hotstash mỗi 100 ms (mặc định của `--sync-interval-ms`), tức Hotstash chịu điều kiện chặt hơn. Server được ghim vào N vCPU đầu bằng `taskset`, `hload` chạy trên các vCPU còn lại. `hload baseline`: 64 kết nối, 10% lệnh ghi, 100 000 khóa, giá trị 64 byte, 10 giây mỗi ô. Mỗi ô chạy 3 lần, mỗi lần trên một server mới. Bảng ghi trung vị, đơn vị lệnh/giây, trong ngoặc là p99. Kịch bản đo: `bench/spike_a_wsl.sh`; số thô: `bench/results/2026-11-16-wsl2-grid.txt`.
 
-| Nhân | Khóa | Pipeline | Valkey 9.1.3 | HCache | HCache / Valkey |
+| Nhân | Khóa | Pipeline | Valkey 9.1.3 | Hotstash | Hotstash / Valkey |
 |---|---|---|---|---|---|
 | 1 | đều | 1 | 47 557 (2,8 ms) | 42 618 (2,8 ms) | 0,90 |
 | 1 | đều | 16 | 568 323 (3,3 ms) | 422 085 (5,2 ms) | **0,74** |
@@ -430,36 +432,36 @@ Mỗi ô chỉ đo một lần, chưa lặp lại để lấy độ dao động.
 
 Ba lần đo của mỗi ô cách nhau không quá 10%, trừ một lần của Valkey ở 1 nhân không pipeline.
 
-- **Một nhân: HCache chậm hơn Valkey.** Có pipeline (lúc server chỉ còn tốn CPU, ít phụ thuộc mạng ảo) HCache đạt 0,74 đến 0,78 lần Valkey, dưới ngưỡng 0,9 của tiêu chí dừng. Đây là kết quả xấu đáng tin nhất của lượt này. Nguyên nhân chưa tìm; một khả năng là luồng ghi log và các luồng nền của HCache dùng chung một nhân với worker.
-- **Hai và bốn nhân: HCache nhanh hơn**, 1,1 đến 1,65 lần, trừ ô 4 nhân, khóa đều, pipeline 16 (0,99). Với khóa Zipf HCache không tụt (1,18 đến 1,65).
-- **Đuôi trễ của HCache xấu hơn khi có pipeline:** p99 cao hơn Valkey ở 1 và 2 nhân, và lần chậm nhất của HCache thường 20 đến 40 ms, của Valkey 10 đến 20 ms.
+- **Một nhân: Hotstash chậm hơn Valkey.** Có pipeline (lúc server chỉ còn tốn CPU, ít phụ thuộc mạng ảo) Hotstash đạt 0,74 đến 0,78 lần Valkey, dưới ngưỡng 0,9 của tiêu chí dừng. Đây là kết quả xấu đáng tin nhất của lượt này. Nguyên nhân chưa tìm; một khả năng là luồng ghi log và các luồng nền của Hotstash dùng chung một nhân với worker.
+- **Hai và bốn nhân: Hotstash nhanh hơn**, 1,1 đến 1,65 lần, trừ ô 4 nhân, khóa đều, pipeline 16 (0,99). Với khóa Zipf Hotstash không tụt (1,18 đến 1,65).
+- **Đuôi trễ của Hotstash xấu hơn khi có pipeline:** p99 cao hơn Valkey ở 1 và 2 nhân, và lần chậm nhất của Hotstash thường 20 đến 40 ms, của Valkey 10 đến 20 ms.
 - **Số không pipeline ở 1 và 2 nhân bị máy ảo giới hạn.** Cho Valkey chạy trên bất kỳ 1 hay 2 vCPU nào (0, 1, 2, 3, 7, 2-3, 6-7) với client trên 4 vCPU khác đều ra khoảng 57 500 lệnh/giây; lên 4 vCPU thì nhảy lên khoảng 410 000. Vậy đó là chi phí đánh thức vCPU của Hyper-V, không phải giới hạn của server. Kịch bản kiểm: `bench/vcpu_check.sh`.
 
 **Lượt này chưa trả lời được tiêu chí dừng.** Tiêu chí cần 8 và 16 nhân, máy phát tải tách riêng, và Linux chạy thẳng trên máy, không qua máy ảo. Máy này chỉ có 8 vCPU dùng chung cho server và client. Số ở 1 nhân là tín hiệu cảnh báo: nếu đo trên máy thuê cũng ra dưới 0,9 thì Spike A trượt ngưỡng 1 nhân.
 
-### Vì sao HCache chậm hơn ở 1 nhân
+### Vì sao Hotstash chậm hơn ở 1 nhân
 
 Đo ngày 2026-11-16 trong WSL2, server ghim vào 1 vCPU, pipeline 16, 64 kết nối, 10% lệnh ghi, không ghi log. Số đo một lần dao động tới 10% theo máy chủ Windows, nên các so sánh dưới đây chạy xen kẽ: mỗi vòng chạy mọi server một lần, 5 hoặc 6 vòng, mỗi lần 4 giây (độ lệch chuẩn khoảng 1%). Kịch bản: `bench/ab_one_core.sh`, `bench/cost_per_op.sh`, `bench/mem_per_key.sh`, `bench/one_core.sh`.
 
 **Không phải do ghi log, system call hay mô hình luồng.**
 
 - Tắt ghi log ở cả hai bên, khoảng cách vẫn vậy (0,77 đến 0,80 lần với 0%, 10% và 100% lệnh ghi).
-- Phần chạy trong nhân hệ điều hành ngang nhau: 2 900 chu kỳ CPU mỗi lệnh ở HCache, 2 700 ở Valkey.
-- Bỏ bớt lần `read` thừa làm số system call của HCache thấp hơn Valkey (70 600 so với 81 500 mỗi giây) nhưng chỉ nhanh thêm 0,9%. Thay đổi này còn làm mất tín hiệu đóng kết nối trên Linux (7 test hỏng), nên đã hoàn lại.
+- Phần chạy trong nhân hệ điều hành ngang nhau: 2 900 chu kỳ CPU mỗi lệnh ở Hotstash, 2 700 ở Valkey.
+- Bỏ bớt lần `read` thừa làm số system call của Hotstash thấp hơn Valkey (70 600 so với 81 500 mỗi giây) nhưng chỉ nhanh thêm 0,9%. Thay đổi này còn làm mất tín hiệu đóng kết nối trên Linux (7 test hỏng), nên đã hoàn lại.
 - Đường đi qua engine (hàng đợi, cổng thực thi, khóa shard) tốn khoảng 150 đến 180 ns mỗi lệnh, chưa tới một phần ba khoảng chênh.
 
-**Nguyên nhân chính: chi phí trong chính chương trình, phần lớn là chờ bộ nhớ khi tra khóa.** HCache tốn 4 460 chu kỳ mỗi lệnh ngoài nhân hệ điều hành, Valkey 2 600. HCache chạy ít lệnh máy hơn (4 400 so với 5 700 mỗi lệnh) nhưng mỗi chu kỳ làm được ít hơn hẳn (IPC 0,74 so với 1,32), tức CPU đứng chờ bộ nhớ.
+**Nguyên nhân chính: chi phí trong chính chương trình, phần lớn là chờ bộ nhớ khi tra khóa.** Hotstash tốn 4 460 chu kỳ mỗi lệnh ngoài nhân hệ điều hành, Valkey 2 600. Hotstash chạy ít lệnh máy hơn (4 400 so với 5 700 mỗi lệnh) nhưng mỗi chu kỳ làm được ít hơn hẳn (IPC 0,74 so với 1,32), tức CPU đứng chờ bộ nhớ.
 
-| Phần việc (ns mỗi lệnh, 100 000 khóa) | HCache | Valkey 9.1.3 |
+| Phần việc (ns mỗi lệnh, 100 000 khóa) | Hotstash | Valkey 9.1.3 |
 |---|---|---|
 | Tra khóa trong bảng băm | 368 (`Dict::find`, gồm 113 so khóa) | khoảng 190 (`hashtableFind` 78 và prefetch 112) |
 | Chép giá trị ra câu trả lời | 132 (`memmove`) | 96 (`addReplyBulk`, gồm cả ghi câu trả lời) |
 | Cấp phát và giải phóng | khoảng 115 | không đáng kể trong profile |
 | Phân tích lệnh | 129 (`Parser::feed`) và 77 (`Cmd::parse`) | 105 (`parseInputBuffer`) |
 
-Một lệnh GET của HCache chạm khoảng bốn vùng nhớ nằm rời nhau: mảng bucket, bản ghi, khóa (một vùng cấp phát riêng) và giá trị (một vùng cấp phát riêng nữa). Valkey 9 chạm khoảng hai: bucket, và một đối tượng chứa cả khóa lẫn giá trị ngắn. Valkey còn prefetch khóa theo lô khi có pipeline, nhưng phần này chỉ đóng góp 1,8% (tắt bằng `--prefetch-batch-max-size 0`). Bằng chứng khác: khoảng cách lớn dần theo số khóa, đúng như khi nút thắt là bộ nhớ.
+Một lệnh GET của Hotstash chạm khoảng bốn vùng nhớ nằm rời nhau: mảng bucket, bản ghi, khóa (một vùng cấp phát riêng) và giá trị (một vùng cấp phát riêng nữa). Valkey 9 chạm khoảng hai: bucket, và một đối tượng chứa cả khóa lẫn giá trị ngắn. Valkey còn prefetch khóa theo lô khi có pipeline, nhưng phần này chỉ đóng góp 1,8% (tắt bằng `--prefetch-batch-max-size 0`). Bằng chứng khác: khoảng cách lớn dần theo số khóa, đúng như khi nút thắt là bộ nhớ.
 
-| Số khóa | HCache / Valkey trước khi sửa | Sau khi sửa |
+| Số khóa | Hotstash / Valkey trước khi sửa | Sau khi sửa |
 |---|---|---|
 | 1 000 (vừa cache) | 0,852 | 0,856 |
 | 100 000 | 0,774 | 0,788 |
@@ -480,7 +482,7 @@ Mô hình luồng không phải thứ thua ở 1 nhân: chi phí của nó (kho�
 
 ### Tối ưu 1 nhân
 
-Đo như trên (1 vCPU, pipeline 16, 64 kết nối, 10% ghi, giá trị 64 byte), xen kẽ 5 vòng, số là HCache / Valkey 9.1.3 đo cùng vòng. Mỗi bước giữ các bước trước. Nghiên cứu đứng sau các bước này (mã nguồn Valkey, Dragonfly, Garnet, memcached, Pelikan, CacheLib; phần cứng; container) nằm trong một báo cáo nội bộ, chưa công khai.
+Đo như trên (1 vCPU, pipeline 16, 64 kết nối, 10% ghi, giá trị 64 byte), xen kẽ 5 vòng, số là Hotstash / Valkey 9.1.3 đo cùng vòng. Mỗi bước giữ các bước trước. Nghiên cứu đứng sau các bước này (mã nguồn Valkey, Dragonfly, Garnet, memcached, Pelikan, CacheLib; phần cứng; container) nằm trong một báo cáo nội bộ, chưa công khai.
 
 | Bước | 1 000 khóa | 100 000 khóa | 1 000 000 khóa |
 |---|---|---|---|
@@ -509,7 +511,7 @@ Dòng "Bỏ `read` thừa" đo xen kẽ 10 vòng khi máy Windows bên ngoài đ
 - **LFU không chia** (`Dict::find`): xác suất tăng bộ đếm tính bằng phép nhân thay vì phép chia lấy dư.
 - **Một lần đọc đồng hồ** (`Shared::slow`, `pump`): khi slowlog bật, giờ kết thúc của lệnh trước được dùng làm giờ bắt đầu của lệnh sau trong cùng lô, trừ khi lệnh trước vừa ghi slowlog hoặc đang có `MONITOR` (khi đó đọc lại đồng hồ). Hai thay đổi này cùng giảm số lệnh máy mỗi lệnh ở 100 000 khóa từ 3 936 xuống 3 580.
 
-Ở 2 và 4 nhân, prefetch không gây tranh chấp khóa shard vì nó chỉ dùng `try_lock`: shard nào đang bận thì bỏ qua. Bảng đầy đủ nằm ở báo cáo. HCache / Valkey: trước đợt một → cuối đợt một (lượt 6 vòng) → cuối đợt hai, build thường / PGO (lượt 4 vòng):
+Ở 2 và 4 nhân, prefetch không gây tranh chấp khóa shard vì nó chỉ dùng `try_lock`: shard nào đang bận thì bỏ qua. Bảng đầy đủ nằm ở báo cáo. Hotstash / Valkey: trước đợt một → cuối đợt một (lượt 6 vòng) → cuối đợt hai, build thường / PGO (lượt 4 vòng):
 
 | Số nhân | 100 000 khóa | 1 000 000 khóa |
 |---|---|---|
@@ -524,14 +526,14 @@ PGO (tối ưu theo profile chạy thật): `bench/pgo_build.sh` build bản có
 |---|---|---|---|---|
 | Valkey 9.1.3 | 1,000 | 1,000 | 1,000 | 1,000 |
 | Redis 8.10.2 | 1,029 | 0,997 | 0,997 | 0,915 |
-| HCache, build thường | 0,955 | 0,902 | 1,575 | 1,399 |
-| HCache, build PGO | 1,066 | 1,013 | 1,854 | 1,769 |
+| Hotstash, build thường | 0,955 | 0,902 | 1,575 | 1,399 |
+| Hotstash, build PGO | 1,066 | 1,013 | 1,854 | 1,769 |
 
-Ở 1 nhân Valkey 9.1.3 đạt 625 377 lệnh/giây với 100 000 khóa; ở 4 nhân, 2 026 378. Redis cách Valkey không quá 3%, trừ ở 4 nhân với 1 000 000 khóa. HCache chạy lệnh trên mọi worker, còn Redis và Valkey chạy lệnh trên một luồng chính và dùng các luồng còn lại cho I/O; đó có lẽ là lý do của khoảng cách ở 4 nhân. Độ lệch chuẩn dưới 3% giá trị trung bình, trừ HCache PGO ở 4 nhân, 100 000 khóa (11%). Cùng máy và cùng giới hạn như trên: máy phát tải dùng chung 8 vCPU.
+Ở 1 nhân Valkey 9.1.3 đạt 625 377 lệnh/giây với 100 000 khóa; ở 4 nhân, 2 026 378. Redis cách Valkey không quá 3%, trừ ở 4 nhân với 1 000 000 khóa. Hotstash chạy lệnh trên mọi worker, còn Redis và Valkey chạy lệnh trên một luồng chính và dùng các luồng còn lại cho I/O; đó có lẽ là lý do của khoảng cách ở 4 nhân. Độ lệch chuẩn dưới 3% giá trị trung bình, trừ Hotstash PGO ở 4 nhân, 100 000 khóa (11%). Cùng máy và cùng giới hạn như trên: máy phát tải dùng chung 8 vCPU.
 
 ## Giới hạn đã biết
 
-- **Linux mới chạy trong WSL2.** Ngày 2026-11-17 bộ 1041 test chạy trên Ubuntu 24.04 trong WSL2 (đường `epoll` chạy qua các test TCP và TLS); đồng hồ thực của WSL có lúc nhảy hơn 10 giây, làm test dựa vào TTL hay Sentinel thỉnh thoảng trượt. Sáu thư viện client chưa chạy trên Linux.
+- **Linux mới chạy trong WSL2.** Ngày 2026-11-18 bộ 1055 test chạy trên Ubuntu 24.04 trong WSL2 (đường `epoll` chạy qua các test TCP và TLS); đồng hồ thực của WSL có lúc nhảy hơn 10 giây, làm test dựa vào TTL hay Sentinel thỉnh thoảng trượt. Sáu thư viện client chưa chạy trên Linux.
 - **Chưa có số đo dùng được cho tiêu chí dừng.** Tiêu chí của Spike A cần Linux chạy thẳng trên máy 8 và 16 nhân, máy phát tải tách riêng và Valkey chạy cùng điều kiện. Số trên WSL2 là lượt đầu, có giới hạn của máy ảo.
 - **Chưa có** (xếp theo đợt ở mục "Bù các tính năng hệ khác có" của kế hoạch): cluster nhiều node (thiết kế ở [docs/cluster-design.md](docs/cluster-design.md)), Search, TimeSeries, các cấu trúc xác suất ngoài Bloom (`CF.*`, `CMS.*`, `TOPK.*`), tầng SSD.
 - **Độ bền, TLS, `CLIENT KILL`, chỗ khác Redis:**
@@ -543,11 +545,11 @@ PGO (tối ưu theo profile chạy thật): `bench/pgo_build.sh` build bản có
   - `CLIENT PAUSE <ms> WRITE` giữ lệnh ghi và lệnh được nhân bản (`PUBLISH`, `SPUBLISH`, script không chỉ đọc); `ALL` giữ mọi lệnh trừ `CLIENT UNPAUSE`. Trong lúc dừng không có hết hạn chủ động, như Valkey.
   - Thời hạn kết nối rảnh kiểm mỗi giây một lần, nên kết nối bị đóng trễ tối đa chừng một giây. Client đọc rất chậm nhưng vẫn đọc thì không bị coi là đứng.
   - TLS: không đổi chứng chỉ lúc đang chạy (phải khởi động lại); chưa có `tls-protocols`, `tls-ciphers`, danh sách thu hồi chứng chỉ; chứng chỉ client chỉ được kiểm là do CA ký, chưa gắn với người dùng ACL. Khi server đầy kết nối, client TLS bị ngắt mà không có câu báo lỗi.
-  - Tệp dữ liệu có thêm bốn loại bản ghi (thư viện hàm, người dùng); bản HCache cũ hơn không đọc được tệp có các bản ghi này.
+  - Tệp dữ liệu có thêm bốn loại bản ghi (thư viện hàm, người dùng); bản Hotstash cũ hơn không đọc được tệp có các bản ghi này.
 - **Nhóm P1, chỗ khác Redis:**
   - Thời hạn của field: `KEYS`, `SCAN`, `DBSIZE`, `RANDOMKEY` có thể còn thấy một hash mà mọi field đã hết hạn, cho đến khi có lệnh chạm vào nó hoặc lượt quét dọn tới.
   - HyperLogLog lưu giống Valkey 9.1 từng byte: dạng thưa cho tới khi một thanh ghi vượt 32 hoặc chuỗi vượt 3000 byte, kèm số đếm mà `PFCOUNT` ghi đệm. Chưa có `PFDEBUG`, `PFSELFTEST`.
-  - `DUMP` ghi RDB phiên bản 8 và `RESTORE` nhận phiên bản tới 12, cho chuỗi, list, set, sorted set, hash. Stream và hash có thời hạn field dùng định dạng riêng của HCache (kiểu `0xE0`, `0xE1`), Redis không đọc được; payload stream của Redis bị từ chối. `IDLETIME` và `FREQ` được nhận rồi bỏ qua. Mã giải mã viết theo tài liệu và trí nhớ về mã Redis, mới kiểm bằng hai vector trong tài liệu Redis, chưa đối chiếu với Redis thật.
+  - `DUMP` ghi RDB phiên bản 8 và `RESTORE` nhận phiên bản tới 12, cho chuỗi, list, set, sorted set, hash. Stream và hash có thời hạn field dùng định dạng riêng của Hotstash (kiểu `0xE0`, `0xE1`), Redis không đọc được; payload stream của Redis bị từ chối. `IDLETIME` và `FREQ` được nhận rồi bỏ qua. Mã giải mã viết theo tài liệu và trí nhớ về mã Redis, mới kiểm bằng hai vector trong tài liệu Redis, chưa đối chiếu với Redis thật.
   - Thông báo keyspace: không phát cho `FLUSHALL`/`FLUSHDB`, cho khóa đích của `COPY ... DB n`, và không có các lớp `n` (khóa mới), `m` (đọc trượt), `d`. Bản nhúng không có listener thì không phát gì. Mỗi shard giữ một số có hạn sự kiện hết hạn chờ phát; vượt quá thì bỏ bớt.
   - `FUNCTION`: thư viện được lưu trong tệp dữ liệu khi có `--data` và được nạp lại lúc khởi động (một thư viện không nạp lại được thì server không khởi động); không có `FUNCTION DUMP`/`RESTORE`; tối đa 1000 thư viện, mỗi thư viện 1 MiB mã. Khi trạng thái Lua bị dựng lại (sau lỗi hết bộ nhớ), thư viện được chạy lại từ mã nguồn; nếu lần chạy lại đăng ký tập hàm khác lần đầu thì `FCALL` báo lỗi.
   - `MEMORY USAGE` là ước lượng theo kích thước dữ liệu, không phải số byte bộ cấp phát thật sự dùng.

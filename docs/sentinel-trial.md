@@ -1,10 +1,10 @@
-# Valkey Sentinel 9.1.3 quản lý nút HCache: kết quả chạy thử
+# Valkey Sentinel 9.1.3 quản lý nút Hotstash: kết quả chạy thử
 
-Ngày 2026-11-17, đợt 3. Môi trường: WSL2 Ubuntu 24.04, 8 vCPU. Dùng Valkey 9.1.3 (`valkey-sentinel`, `valkey-server`, `valkey-cli`) dựng từ mã nguồn. HCache là bản release dựng từ `spike/` hiện tại.
+Ngày 2026-11-17, đợt 3. Môi trường: WSL2 Ubuntu 24.04, 8 vCPU. Dùng Valkey 9.1.3 (`valkey-sentinel`, `valkey-server`, `valkey-cli`) dựng từ mã nguồn. Hotstash là bản release dựng từ `spike/` hiện tại.
 
 ## Kết luận
 
-Một Sentinel thật của Valkey 9.1.3 giờ quản lý được nhóm ba nút HCache trọn vòng:
+Một Sentinel thật của Valkey 9.1.3 giờ quản lý được nhóm ba nút Hotstash trọn vòng:
 - phát hiện các nút;
 - failover tự động khi primary chết;
 - đưa primary cũ về làm replica khi nó chạy lại;
@@ -13,27 +13,27 @@ Một Sentinel thật của Valkey 9.1.3 giờ quản lý được nhóm ba nút
 
 Cùng kịch bản chạy với ba nút Valkey cho kết quả và thời gian như nhau: mỗi bên qua 19/19 bước.
 
-Trước đợt 3, Sentinel phát hiện được nút HCache nhưng không failover được: lần nào cũng kết thúc bằng `-failover-abort-slave-timeout`. Có hai chỗ chặn:
+Trước đợt 3, Sentinel phát hiện được nút Hotstash nhưng không failover được: lần nào cũng kết thúc bằng `-failover-abort-slave-timeout`. Có hai chỗ chặn:
 - `CLIENT KILL` trong `MULTI` bị từ chối, nên cả khối đổi vai bị `EXECABORT`;
 - `SLAVEOF`/`REPLICAOF` trong `EXEC` không chạy (`ERR REPLICAOF needs the server`).
 
-Mục "Đã sửa trong HCache" liệt kê các thay đổi.
+Mục "Đã sửa trong Hotstash" liệt kê các thay đổi.
 
 ## Cách chạy lại
 
 ```bash
-bench/sentinel_trial.sh hcache /root/src/valkey-9.1.3/src /root/spike-sentinel/target/release/hcache-server
+bench/sentinel_trial.sh hotstash /root/src/valkey-9.1.3/src /root/spike-sentinel/target/release/hotstash-server
 bench/sentinel_trial.sh valkey /root/src/valkey-9.1.3/src
 ```
 
 - **Cổng:** 7500–7502 là các nút; 7510–7512 là ba Sentinel, đều trên 127.0.0.1.
 - **Cấu hình Sentinel:** `sentinel monitor mymaster 127.0.0.1 7500 2`, `down-after-milliseconds 2000`, `failover-timeout 10000`, `parallel-syncs 1`.
-- **HCache:** chạy với `--workers 2`, không có file dữ liệu.
+- **Hotstash:** chạy với `--workers 2`, không có file dữ liệu.
 - **Kết quả:** mỗi bước in `PASS` hoặc `FAIL`, cuối cùng là các sự kiện trong log Sentinel.
 
 ## Kết quả (lần chạy cuối, 2026-11-17 15:37–15:39)
 
-| Bước | HCache | Valkey |
+| Bước | Hotstash | Valkey |
 |---|---|---|
 | Phát hiện: 2 replica, 2 Sentinel khác, run ID 40 ký tự, `SENTINEL CKQUORUM` OK | PASS | PASS |
 | `kill -9` primary 7500, Sentinel chuyển sang primary mới | PASS, 5 s (các lần trước: 4 s, 5 s) | PASS, 5 s (các lần trước: 4 s, 5 s, 7 s) |
@@ -46,9 +46,9 @@ bench/sentinel_trial.sh valkey /root/src/valkey-9.1.3/src
 
 Thời gian 8–12 s ở bước chạy lại primary cũ là do Sentinel: nó chỉ đổi vai một nút báo `master` sau khi nút đó báo như vậy liên tục 8 s (`sentinel_publish_period * 4`).
 
-Một lần chạy với HCache ngay trước đó (15:34–15:37) trượt 3 bước: failover tự động, dữ liệu trên primary mới, và 7500 về làm replica. Log của Sentinel cho thấy nó vào TILT hai lần (15:34:47 và 15:35:11) dù `tilt-trigger` đã là 10 s, tức đồng hồ thực nhảy hơn 10 s. Khi ra khỏi TILT, các replica đã mất liên kết quá lâu nên Sentinel báo `-failover-abort-no-good-slave`, như mô tả ở mục "Môi trường". Các bước `SENTINEL FAILOVER` và COORDINATED của lần đó vẫn đạt. Cùng lúc đó bộ test Linux cũng có một test trượt vì đồng hồ thực nhảy khoảng 23,7 s. Lần chạy kế tiếp với Valkey rồi với HCache, không có TILT, đều đạt 19/19.
+Một lần chạy với Hotstash ngay trước đó (15:34–15:37) trượt 3 bước: failover tự động, dữ liệu trên primary mới, và 7500 về làm replica. Log của Sentinel cho thấy nó vào TILT hai lần (15:34:47 và 15:35:11) dù `tilt-trigger` đã là 10 s, tức đồng hồ thực nhảy hơn 10 s. Khi ra khỏi TILT, các replica đã mất liên kết quá lâu nên Sentinel báo `-failover-abort-no-good-slave`, như mô tả ở mục "Môi trường". Các bước `SENTINEL FAILOVER` và COORDINATED của lần đó vẫn đạt. Cùng lúc đó bộ test Linux cũng có một test trượt vì đồng hồ thực nhảy khoảng 23,7 s. Lần chạy kế tiếp với Valkey rồi với Hotstash, không có TILT, đều đạt 19/19.
 
-Ở lần chạy thủ công trước đó (cùng ngày, 14:51), trạng thái cuối của HCache khớp Valkey: 7502 là primary, 7500 và 7501 là replica đã kết nối. Lúc chụp, replica của Valkey còn ở `handshake` vì đang đồng bộ toàn phần, còn của HCache đã `connected`.
+Ở lần chạy thủ công trước đó (cùng ngày, 14:51), trạng thái cuối của Hotstash khớp Valkey: 7502 là primary, 7500 và 7501 là replica đã kết nối. Lúc chụp, replica của Valkey còn ở `handshake` vì đang đồng bộ toàn phần, còn của Hotstash đã `connected`.
 
 ## Sentinel gửi gì cho nút
 
@@ -59,10 +59,10 @@ Sentinel không đọc trả lời của các khối này. Nó chỉ xem hiệu 
 - **COORDINATED, sau khi promote, gửi cho cả hai nút** (`sentinelKillClients`): `MULTI`, `CONFIG REWRITE`, `CLIENT KILL TYPE normal`, `CLIENT KILL TYPE pubsub`, `CLIENT UNPAUSE`, `EXEC`.
 - **Thường xuyên:** `PING` khoảng mỗi 1 s và `INFO` mỗi 10 s (mỗi 1 s cho replica của primary đã chết). Cứ 2 s một lần có `PUBLISH __sentinel__:hello ...`; Sentinel dừng gửi lệnh này khi nút đang FAILOVER. Kết nối pub/sub dùng `SUBSCRIBE __sentinel__:hello`. Mỗi kết nối mở đầu bằng `CLIENT SETNAME sentinel-<id>-cmd|pubsub`.
 
-## Đã sửa trong HCache (đợt 3)
+## Đã sửa trong Hotstash (đợt 3)
 
-1. **`CLIENT KILL` được dùng trong `MULTI`** (`hcache-core/src/txn.rs`). Mặc định nó bỏ qua chính kết nối gọi, như Valkey.
-2. **`EXEC` giao cho server phần chỉ server làm được: `CLIENT ...`, `REPLICAOF`/`SLAVEOF` và `FAILOVER`.** Engine chạy phần còn lại trước, giữ chỗ cho từng lệnh này. Sau đó server chạy chúng đúng thứ tự xếp hàng và điền trả lời vào đúng vị trí (`split_exec`, `finish_exec` trong `hcache-server/src/lib.rs`).
+1. **`CLIENT KILL` được dùng trong `MULTI`** (`hotstash-core/src/txn.rs`). Mặc định nó bỏ qua chính kết nối gọi, như Valkey.
+2. **`EXEC` giao cho server phần chỉ server làm được: `CLIENT ...`, `REPLICAOF`/`SLAVEOF` và `FAILOVER`.** Engine chạy phần còn lại trước, giữ chỗ cho từng lệnh này. Sau đó server chạy chúng đúng thứ tự xếp hàng và điền trả lời vào đúng vị trí (`split_exec`, `finish_exec` trong `hotstash-server/src/lib.rs`).
    - `REPLICAOF` đổi vai trên luồng riêng; `EXEC` đợi xong mới chạy tiếp.
    - Nếu `WATCH` hỏng thì không lệnh nào chạy, kể cả phần của server.
 3. **`INFO` có `run_id`:** 40 chữ số hex, mới mỗi lần khởi động. Sentinel dùng nó để nhận ra nút đã khởi động lại (`+reboot`) và để phá thế hòa khi chọn replica.
@@ -79,16 +79,16 @@ Sentinel không đọc trả lời của các khối này. Nó chỉ xem hiệu 
    - Hai lần pause gộp lại tới mốc muộn hơn; `WRITE` không rút ngắn một `ALL` đang chạy.
    - Như Valkey, trong lúc pause không có expire chủ động, không có PING tới replica và không có `REPLCONF GETACK`.
    - Như Valkey, replica trả `READONLY` cho lệnh ghi trước khi xét pause.
-7. **`FAILOVER` giữ cả `PUBLISH`/`SPUBLISH`**, trước đây chỉ giữ lệnh ghi. Lý do: HCache nhân bản PUBLISH sang replica, nên nếu PUBLISH chạy giữa lúc bàn giao thì offset sẽ lệch.
+7. **`FAILOVER` giữ cả `PUBLISH`/`SPUBLISH`**, trước đây chỉ giữ lệnh ghi. Lý do: Hotstash nhân bản PUBLISH sang replica, nên nếu PUBLISH chạy giữa lúc bàn giao thì offset sẽ lệch.
 8. **`CONFIG REWRITE` trả `ERR The server is running without a config file`**, như Valkey khi không có file cấu hình. Trước đây nó trả `OK`.
 
-Test: `crates/hcache/tests/sentinel.rs` có 7 test, gồm cả hai khối đổi vai và khối COORDINATED đúng như Sentinel gửi. Test chạy qua trên Windows và WSL.
+Test: `crates/hotstash/tests/sentinel.rs` có 7 test, gồm cả hai khối đổi vai và khối COORDINATED đúng như Sentinel gửi. Test chạy qua trên Windows và WSL.
 
 ## Môi trường: đồng hồ WSL và TILT
 
 Đo trong WSL bằng một vòng lặp ngủ 50 ms, 80 s cho mỗi trường hợp:
 - **Không chạy gì:** wall-clock nhảy tới khoảng 3 s, đều đặn mỗi khoảng 35 s.
-- **Ba nút HCache:** như trên.
+- **Ba nút Hotstash:** như trên.
 - **Ba nút Valkey:** như trên.
 - **Đồng hồ monotonic:** đều trong cả ba trường hợp; bước lớn nhất là 0,05 s.
 
@@ -110,9 +110,9 @@ Kịch bản đặt `SENTINEL DEBUG tilt-trigger 10000` cho từng Sentinel. M�
   - nhiều máy thật;
   - phân vùng mạng (mới chỉ thử `kill -9`);
   - `replica-priority 0` với Sentinel thật (mới thử bằng test).
-- **HCache chưa tự làm Sentinel.** Thiết kế chế độ sentinel nằm ở [sentinel-spec.md](sentinel-spec.md).
-- **`MONITOR` của HCache hiện cả lệnh quản trị** (`SLAVEOF`, `CONFIG`), Valkey thì giấu. Điểm này không ảnh hưởng Sentinel.
+- **Hotstash chưa tự làm Sentinel.** Thiết kế chế độ sentinel nằm ở [sentinel-spec.md](sentinel-spec.md).
+- **`MONITOR` của Hotstash hiện cả lệnh quản trị** (`SLAVEOF`, `CONFIG`), Valkey thì giấu. Điểm này không ảnh hưởng Sentinel.
 
 ## Dọn dẹp
 
-Kịch bản dừng mọi tiến trình nó mở theo PID: `kill`, rồi `kill -9`, không dùng `pkill`. Thư mục làm việc là `/tmp/hcache-sentinel-<loại>` trong WSL. Các bản sao dùng khi thử là `/root/spike-sentinel`, `/root/sent` và `/root/hcache-server.*`; có thể xóa.
+Kịch bản dừng mọi tiến trình nó mở theo PID: `kill`, rồi `kill -9`, không dùng `pkill`. Thư mục làm việc là `/tmp/hotstash-sentinel-<loại>` trong WSL. Các bản sao dùng khi thử là `/root/spike-sentinel`, `/root/sent` và `/root/hotstash-server.*`; có thể xóa.

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/hcache-core", "crates/hcache-server", "crates/hcache", "crates/hload", "crates/spikeb"]
+members = ["crates/hotstash-core", "crates/hotstash-server", "crates/hotstash", "crates/hload", "crates/spikeb"]
 
 [workspace.package]
 version = "0.0.0"

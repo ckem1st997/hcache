@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Interleaved A/B on N pinned vCPUs: each round runs every server once, so
 # drift of the host hits all of them alike. The load generator gets the
-# vCPUs left over. A server is "valkey", "redis", or the name of an HCache
-# binary in $VARIANTS. Valkey and Redis get --io-threads N, HCache
+# vCPUs left over. A server is "valkey", "redis", or the name of an Hotstash
+# binary in $VARIANTS. Valkey and Redis get --io-threads N, Hotstash
 # --workers N; none of them writes to disk.
 # Usage: VALKEY=... REDIS=... VARIANTS=dir bench/ab_cores.sh CORES KEYS ROUNDS server...
 CORES=$1; KEYS=$2; ROUNDS=$3; shift 3

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Spike A, first pass on one machine (WSL2): HCache against Valkey with the
+# Spike A, first pass on one machine (WSL2): Hotstash against Valkey with the
 # server pinned to N cores and hload pinned to the others. Both write a log
 # with fsync every second. Each cell runs REPS times on a fresh server.
 #
-# Usage: bench/spike_a_wsl.sh VALKEY_SERVER HCACHE_SERVER HLOAD OUT_FILE
+# Usage: bench/spike_a_wsl.sh VALKEY_SERVER HOTSTASH_SERVER HLOAD OUT_FILE
 set -euo pipefail
 
 VALKEY=$1
-HCACHE=$2
+HOTSTASH=$2
 HLOAD=$3
 OUT=$4
 SECS=${SECS:-10}
@@ -37,9 +37,9 @@ start() { # server cores
                 --io-threads "$2" --logfile "$WORK/valkey.log" >/dev/null 2>&1 &
             PID=$!
             wait_port 6379 ;;
-        hcache)
-            taskset -c "$cpus" "$HCACHE" --port 6380 --bind 127.0.0.1 --workers "$2" \
-                --data "$WORK/data/data.hc" --appendfsync everysec >"$WORK/hcache.log" 2>&1 &
+        hotstash)
+            taskset -c "$cpus" "$HOTSTASH" --port 6380 --bind 127.0.0.1 --workers "$2" \
+                --data "$WORK/data/data.hc" --appendfsync everysec >"$WORK/hotstash.log" 2>&1 &
             PID=$!
             wait_port 6380 ;;
     esac
@@ -58,7 +58,7 @@ for cores in ${CORES:-1 2 4}; do
     for zipf in 0 0.99; do
         for pipeline in 1 16; do
             for rep in $(seq "$REPS"); do
-                for server in valkey hcache; do
+                for server in valkey hotstash; do
                     start "$server" "$cores"
                     line=$(taskset -c "$client_cpus" "$HLOAD" baseline \
                         --addr "127.0.0.1:$(port "$server")" --secs "$SECS" \

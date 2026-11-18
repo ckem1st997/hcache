@@ -1,4 +1,4 @@
-//! HCache spike against redis-rs (sync API). Every check runs; nothing aborts the run.
+//! Hotstash spike against redis-rs (sync API). Every check runs; nothing aborts the run.
 //!
 //! Checks named x_* use Redis features outside the spike's scope; they show
 //! what a real application would hit, they are not expected to pass.
@@ -20,11 +20,11 @@ const P: &str = "rs:";
 type R = Result<(), String>;
 
 fn port() -> String {
-    std::env::var("HCACHE_PORT").unwrap_or_else(|_| "6400".to_string())
+    std::env::var("HOTSTASH_PORT").unwrap_or_else(|_| "6400".to_string())
 }
 
 fn proto() -> Option<String> {
-    std::env::var("HCACHE_PROTO").ok().filter(|s| !s.is_empty())
+    std::env::var("HOTSTASH_PROTO").ok().filter(|s| !s.is_empty())
 }
 
 fn url() -> String {

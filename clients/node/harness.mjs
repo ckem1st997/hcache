@@ -2,9 +2,9 @@
 import { isDeepStrictEqual, inspect } from "node:util";
 import { readFileSync } from "node:fs";
 
-export const PORT = Number(process.env.HCACHE_PORT ?? 6400);
-// HCACHE_PROTO=2|3 forces a protocol; unset means the library's default handshake.
-export const PROTO = process.env.HCACHE_PROTO ? Number(process.env.HCACHE_PROTO) : undefined;
+export const PORT = Number(process.env.HOTSTASH_PORT ?? 6400);
+// HOTSTASH_PROTO=2|3 forces a protocol; unset means the library's default handshake.
+export const PROTO = process.env.HOTSTASH_PROTO ? Number(process.env.HOTSTASH_PROTO) : undefined;
 
 const CHECK_TIMEOUT_MS = 30_000;
 const AFTER_HANG_TIMEOUT_MS = 3_000;

@@ -1,21 +1,21 @@
-# Cluster nhiều node cho HCache: thiết kế
+# Cluster nhiều node cho Hotstash: thiết kế
 
 Ngày 2026-11-17, đợt 3. Trạng thái: bản thảo để chủ dự án duyệt. Chưa có dòng code nào; tài liệu này chọn hướng, chia giai đoạn và nêu rủi ro.
 
 Quy ước trích dẫn:
-- Đường dẫn HCache tính từ `spike/`.
+- Đường dẫn Hotstash tính từ `spike/`.
 - Đường dẫn mã tham chiếu tính từ thư mục `ref-src/` (mã nguồn Valkey, Dragonfly, Garnet tải về, chỉ đọc, không dựng, không chạy).
 - Chỗ ghi **[suy luận]** là điều tôi suy ra nhưng chưa kiểm chứng bằng mã hay bằng chạy thử.
 
 ## 1. Kết luận
 
-- **Đích cuối là hướng (a):** cluster bus tương thích wire với Valkey. Nút HCache tham gia được cluster Valkey; `valkey-cli --cluster` và các operator đang dùng quản lý được nó.
+- **Đích cuối là hướng (a):** cluster bus tương thích wire với Valkey. Nút Hotstash tham gia được cluster Valkey; `valkey-cli --cluster` và các operator đang dùng quản lý được nó.
 - **Đường đi:** làm trước phần dùng chung cho mọi hướng (bảng slot, chuyển hướng MOVED/ASK, `MIGRATE`), chạy với topology tĩnh kiểu Dragonfly (hướng c). Sau đó mới làm bus.
-- **Không làm hướng (b)** (bus riêng của HCache như Garnet). Nó tốn gần bằng (a) mà không được công cụ nào của hệ sinh thái.
+- **Không làm hướng (b)** (bus riêng của Hotstash như Garnet). Nó tốn gần bằng (a) mà không được công cụ nào của hệ sinh thái.
 - **Chuyển slot:** kiểu cũ (`SETSLOT` + `MIGRATE` + `ASK`) trước, kiểu nguyên tử của Valkey 9 sau.
-- **Công sức:** khoảng 76–105 ngày công cho một kỹ sư, chia 5 giai đoạn. Có một điểm dừng sau giai đoạn 2: tới đó HCache đã là cluster dùng được với topology tĩnh, nhưng chưa tự failover.
+- **Công sức:** khoảng 76–105 ngày công cho một kỹ sư, chia 5 giai đoạn. Có một điểm dừng sau giai đoạn 2: tới đó Hotstash đã là cluster dùng được với topology tĩnh, nhưng chưa tự failover.
 
-## 2. HCache đang có gì
+## 2. Hotstash đang có gì
 
 Kế hoạch bản 2 xếp "Cluster nhiều node: cluster bus, chuyển slot, `MIGRATE`" vào đợt 3, sau replication (kế hoạch nội bộ, chưa công khai). Kế hoạch cũng ghi rõ giả lập một node hiện tại không qua các test về chuyển slot, failover của cluster và đọc từ replica.
 
@@ -23,22 +23,22 @@ Những điểm trong mã liên quan trực tiếp tới thiết kế:
 
 | Chỗ | Hiện trạng | Hệ quả cho cluster thật |
 |---|---|---|
-| `crates/hcache-core/src/cluster.rs:1-4` | Một node giữ cả 16384 slot, không bao giờ chuyển hướng | Cần một bảng topology thật |
+| `crates/hotstash-core/src/cluster.rs:1-4` | Một node giữ cả 16384 slot, không bao giờ chuyển hướng | Cần một bảng topology thật |
 | `cluster.rs:49-51`, `:56-77` | `key_slot` (CRC16, có hash tag), `slot_of` gom slot của khóa và kênh `SSUBSCRIBE`/`SPUBLISH` | Dùng lại nguyên |
-| `crates/hcache-core/src/engine.rs:1132-1148` | Ở chế độ cluster, shard nội bộ = `slot * shards / 16384`, chỉ số `db * shards + local` | Một slot nằm trọn trong một shard nội bộ; một shard chứa một dải slot liền nhau, trộn chung một bảng băm |
-| `engine.rs:3956-3975`, `crates/hcache-core/src/cmd.rs:1273` | `COUNTKEYSINSLOT`/`GETKEYSINSLOT` quét cả shard, chạy ở phía exclusive của gate | Quá chậm cho cluster thật, xem mục 5.3 |
-| `crates/hcache-core/src/txn.rs:50-75`, `:151-160` | `CROSSSLOT` được kiểm trong `TxnState::feed`; transaction nhớ slot của lệnh đầu | Đây là chỗ đặt kiểm tra chuyển hướng |
-| `crates/hcache-server/src/lib.rs:3351` | Mọi lệnh của client đi qua `conn.txn.feed(engine, parsed)` | Một điểm chặn duy nhất cho mọi lệnh |
+| `crates/hotstash-core/src/engine.rs:1132-1148` | Ở chế độ cluster, shard nội bộ = `slot * shards / 16384`, chỉ số `db * shards + local` | Một slot nằm trọn trong một shard nội bộ; một shard chứa một dải slot liền nhau, trộn chung một bảng băm |
+| `engine.rs:3956-3975`, `crates/hotstash-core/src/cmd.rs:1273` | `COUNTKEYSINSLOT`/`GETKEYSINSLOT` quét cả shard, chạy ở phía exclusive của gate | Quá chậm cho cluster thật, xem mục 5.3 |
+| `crates/hotstash-core/src/txn.rs:50-75`, `:151-160` | `CROSSSLOT` được kiểm trong `TxnState::feed`; transaction nhớ slot của lệnh đầu | Đây là chỗ đặt kiểm tra chuyển hướng |
+| `crates/hotstash-server/src/lib.rs:3351` | Mọi lệnh của client đi qua `conn.txn.feed(engine, parsed)` | Một điểm chặn duy nhất cho mọi lệnh |
 | `engine.rs:3757`, `cmd.rs:858` | `ASKING` trả `OK` nhưng không nhớ gì; `READONLY`/`READWRITE` là `Cmd::Static(Reply::Ok)` | Cần cờ theo từng kết nối |
 | `cluster.rs:218-292` | `CLUSTER NODES/SLOTS/SHARDS` viết cứng cho một node; các lệnh quản trị khác trả lỗi "not supported" | Sinh từ bảng topology |
 | `lib.rs:3936-3937`, `lib.rs:4030-4032` | `REPLICAOF` và `FAILOVER` bị từ chối ở chế độ cluster, như Valkey (`valkey/src/replication.c:5275-5278`) | Replica trong cluster phải đi qua `CLUSTER REPLICATE` |
-| `crates/hcache-core/src/repl.rs:1-23` | Dòng replication là lệnh RESP theo hiệu ứng; thứ tự đảm bảo theo shard (dòng 17-20) | Dùng lại cho luồng chuyển slot |
+| `crates/hotstash-core/src/repl.rs:1-23` | Dòng replication là lệnh RESP theo hiệu ứng; thứ tự đảm bảo theo shard (dòng 17-20) | Dùng lại cho luồng chuyển slot |
 | `engine.rs:1377-1389` | Snapshot cho full sync lấy gate exclusive của cả node (không fork) | Không dùng nguyên cho chuyển slot được, xem mục 5.3 |
-| `crates/hcache-core/src/shard/dump.rs:1-5`, `:266-313` | `DUMP`/`RESTORE` cùng định dạng Valkey | Nền cho `MIGRATE` |
+| `crates/hotstash-core/src/shard/dump.rs:1-5`, `:266-313` | `DUMP`/`RESTORE` cùng định dạng Valkey | Nền cho `MIGRATE` |
 | `cmdtable.rs:241`, `ops.rs:875`, `ops.rs:1039` | `RESTORE` có; `MIGRATE` chưa có (chỉ có tên `MIGRATESLOTS` trong danh sách lệnh con CLUSTER) | Phải viết `MIGRATE` |
 | `lib.rs:584-600` | `Shared::holds`: tạm giữ lệnh ghi khi FAILOVER hoặc `CLIENT PAUSE` | Dùng lại cho bước chốt khi chuyển slot và manual failover |
-| `crates/hcache-core/src/persist.rs:1-30` | File append-only theo khóa, có `<file>.lock` | `nodes.conf` là file riêng |
-| `crates/hcache-core/src/script/functions.rs:31` | Có cờ `no-cluster`; không kiểm khóa ngoài slot bên trong script | Phải thêm kiểm tra như Valkey |
+| `crates/hotstash-core/src/persist.rs:1-30` | File append-only theo khóa, có `<file>.lock` | `nodes.conf` là file riêng |
+| `crates/hotstash-core/src/script/functions.rs:31` | Có cờ `no-cluster`; không kiểm khóa ngoài slot bên trong script | Phải thêm kiểm tra như Valkey |
 
 ## 3. Ba hướng và lựa chọn
 
@@ -97,8 +97,8 @@ Bộ test cluster của Valkey (69 file trong `valkey/tests/unit/cluster/`) dự
 ### 3.3 Khuyến nghị
 
 Đi (c) làm bước đệm, rồi lên (a). Lý do:
-- **Đúng luận điểm của dự án.** HCache bán sự thay thế không cần sửa client và công cụ (kế hoạch, dòng 13). Phần Sentinel cũng đã làm theo kiểu tương thích wire với Valkey thật (`docs/sentinel-trial.md`).
-- **Có đường di chuyển.** Với (a), người dùng thêm nút HCache làm replica vào cluster Valkey đang chạy, rồi failover sang. Hai hướng còn lại không cho làm điều này.
+- **Đúng luận điểm của dự án.** Hotstash bán sự thay thế không cần sửa client và công cụ (kế hoạch, dòng 13). Phần Sentinel cũng đã làm theo kiểu tương thích wire với Valkey thật (`docs/sentinel-trial.md`).
+- **Có đường di chuyển.** Với (a), người dùng thêm nút Hotstash làm replica vào cluster Valkey đang chạy, rồi failover sang. Hai hướng còn lại không cho làm điều này.
 - **Bỏ (b).** Nó có chi phí của (a) mà không có lợi ích của (a).
 - **Không phí công.** Giai đoạn 1–2 dùng chung cho mọi hướng và tự đứng được: topology tĩnh cộng một bộ điều khiển bên ngoài.
 
@@ -109,15 +109,15 @@ Một điều kiện để không phải làm lại: bảng topology ở giai đ
 
 Khi đó file người vận hành viết tay ở giai đoạn 1 chính là file bus ghi ra ở giai đoạn 3.
 
-## 4. Những gì client thấy, và chỗ đặt trong HCache
+## 4. Những gì client thấy, và chỗ đặt trong Hotstash
 
 Ở Valkey, kiểm tra chuyển hướng nằm trong `processCommand`. Nó bỏ qua lệnh đến từ primary và lệnh không có khóa (`valkey/src/server.c:4793-4811`), rồi gọi `getNodeByQuery` (`valkey/src/cluster.c:1066`).
 
-Ở HCache, điểm tương ứng là `TxnState::feed` (`txn.rs:62-75`), ngay sau `slot_of`. Luồng replication (`Replay::apply`, `repl.rs:931`) không đi qua `feed`, nên tự nhiên được miễn như "obey client" của Valkey.
+Ở Hotstash, điểm tương ứng là `TxnState::feed` (`txn.rs:62-75`), ngay sau `slot_of`. Luồng replication (`Replay::apply`, `repl.rs:931`) không đi qua `feed`, nên tự nhiên được miễn như "obey client" của Valkey.
 
 Đề xuất một hàm `cluster::route(slot, cờ kết nối, lệnh) -> Ok | Redirect(Reply)` thuần, không I/O, để kiểm bằng unit test theo đúng bảng quyết định của `getNodeByQuery`.
 
-| Hạng mục | Quy tắc của Valkey | Việc trong HCache |
+| Hạng mục | Quy tắc của Valkey | Việc trong Hotstash |
 |---|---|---|
 | `MOVED` | Slot thuộc node khác: `-MOVED <slot> <host>:<port>` (`cluster.c:1335-1338`, định dạng `:1362-1367`). Client TLS được báo cổng TLS (`:1363-1365`) | Tra bảng slot; chọn cổng theo kết nối có TLS hay không (`tls.rs`) |
 | Slot không ai giữ | `-CLUSTERDOWN Hash slot not served` (`cluster.c:1119-1124`, `:1360-1361`) | Như Valkey |
@@ -133,7 +133,7 @@ Khi đó file người vận hành viết tay ở giai đoạn 1 chính là file
 | Thông báo keyspace | Chỉ cục bộ: `notifyKeyspaceEvent` không gửi gì qua cluster (`valkey/src/notify.c:107`) | Giữ nguyên (`notify.rs`); client phải đăng ký trên từng primary |
 | `CLUSTER SLOTS` | Mỗi dải: đầu, cuối, primary, rồi các replica còn sống (`cluster.c:1515-1534`); reply được cache và xóa khi topology đổi (`:1537`) | Sinh từ bảng; cache theo phiên bản topology |
 | `CLUSTER SHARDS`, `NODES` | `cluster_legacy.c:8090`; `NODES` cùng định dạng `nodes.conf` (`:7851`) | Thay phần viết cứng ở `cluster.rs:229-268` |
-| Nhiều database | Valkey 9 cho cluster nhiều DB; chuyển slot duyệt mọi DB (`cluster_migrateslots.c:1667`) | HCache đã có `--cluster-databases` (`crates/hcache-server/src/main.rs:435-438`); mọi đường chuyển slot phải lặp theo DB |
+| Nhiều database | Valkey 9 cho cluster nhiều DB; chuyển slot duyệt mọi DB (`cluster_migrateslots.c:1667`) | Hotstash đã có `--cluster-databases` (`crates/hotstash-server/src/main.rs:435-438`); mọi đường chuyển slot phải lặp theo DB |
 
 ## 5. Chuyển slot
 
@@ -174,11 +174,11 @@ Dragonfly làm tương tự:
 - lúc chốt, tạm dừng **mọi** client, và để TODO "chỉ chặn các slot đang chuyển" (`:428-435`);
 - lặp lại `DFLYMIGRATE ACK` theo số lần thử (`:380-395`, `:457-500`).
 
-### 5.3 Ánh xạ vào shard nội bộ và dòng replication của HCache
+### 5.3 Ánh xạ vào shard nội bộ và dòng replication của Hotstash
 
 **Chỉ mục theo slot.**
 - Valkey giữ một bảng băm cho mỗi slot (`kvstore`), nên đếm khóa của slot là O(1) (`cluster.c:846-847`).
-- HCache trộn mọi slot của một shard trong một bảng, và đếm bằng cách quét (`engine.rs:3966-3975`).
+- Hotstash trộn mọi slot của một shard trong một bảng, và đếm bằng cách quét (`engine.rs:3966-3975`).
 - `valkey-cli` gọi `COUNTKEYSINSLOT` cho từng slot khi check và fix (`valkey-cli.c:6198`, `:6502`), và `GETKEYSINSLOT` liên tục khi reshard. 16384 lần quét cả shard là không chấp nhận được.
 
 Đề xuất theo hai bước:
@@ -223,11 +223,11 @@ Kiểu nguyên tử cần tăng epoch và lan cấu hình, nên đặt sau bus. 
 ### 6.2 Quan hệ với mã FAILOVER/PSYNC hiện có
 
 - **Đường dữ liệu dùng lại hết.** Trong cluster của Valkey, primary và replica vẫn dùng replication thường. `follow.rs` (PSYNC, partial resync, `Replay`) và việc đổi replication ID (`repl.rs:840-851`) dùng nguyên. `CLUSTER REPLICATE <id>` chỉ cần mở link `follow.rs` tới địa chỉ của node đó, vì `REPLICAOF` bị cấm ở chế độ cluster.
-- **Manual failover dùng lại một phần.** `FAILOVER` của HCache do primary chủ động, qua `PSYNC FAILOVER` (`lib.rs:665-790`, `follow.rs:63-95`). `CLUSTER FAILOVER` thì do replica chủ động, qua bus. Phần dùng lại được là cơ chế giữ lệnh ghi (`lib.rs:584-600`) và phép kiểm "replica đã có toàn bộ dòng" của `failover_tick` (`lib.rs:665-703`).
+- **Manual failover dùng lại một phần.** `FAILOVER` của Hotstash do primary chủ động, qua `PSYNC FAILOVER` (`lib.rs:665-790`, `follow.rs:63-95`). `CLUSTER FAILOVER` thì do replica chủ động, qua bus. Phần dùng lại được là cơ chế giữ lệnh ghi (`lib.rs:584-600`) và phép kiểm "replica đã có toàn bộ dòng" của `failover_tick` (`lib.rs:665-703`).
 - **Bầu chọn và epoch là mã mới hoàn toàn,** chỉ có từ giai đoạn 4.
 - **Giai đoạn 1–2 (chưa có bus):** bộ điều khiển bên ngoài quyết định, như Garnet và Dragonfly. Nó gửi `CLUSTER FAILOVER TAKEOVER` cho replica (chỉ đổi bảng cục bộ), rồi đẩy topology mới cho mọi node. Node thấy mình không còn là chủ và được ghi là replica của node mới thì tự mở link `follow.rs`. Dragonfly có bước tương tự: `ReconcileMasterSlots`/`ReconcileReplicaSlots` (`cluster_family.cc:1195-1278`).
 
-Sentinel không giúp được: Sentinel đổi vai bằng `REPLICAOF`, mà lệnh này bị cấm ở chế độ cluster ở cả Valkey và HCache.
+Sentinel không giúp được: Sentinel đổi vai bằng `REPLICAOF`, mà lệnh này bị cấm ở chế độ cluster ở cả Valkey và Hotstash.
 
 ## 7. Trạng thái bền vững, bảo mật, các kiểu hỏng
 
@@ -236,7 +236,7 @@ Sentinel không giúp được: Sentinel đổi vai bằng `REPLICAOF`, mà lệ
 - **Nội dung:** cùng định dạng `CLUSTER NODES`, thêm dòng `vars currentEpoch … lastVoteEpoch …` (`cluster_legacy.c:1088-1096`).
 - **Ghi đĩa:** ghi và fsync mỗi khi epoch đổi, trước khi hành động tiếp (ví dụ `:2638`, `:6578-6582`). Có file khóa `nodes.conf.lock` (`:1281-1290`). File hỏng thì dừng tiến trình (`:1085-1086`).
 - **Vì sao fsync quan trọng:** tính đúng của bỏ phiếu dựa vào việc `lastVoteEpoch` đã nằm trên đĩa. Node bỏ phiếu, khởi động lại, rồi quên thì có thể bỏ phiếu hai lần trong một epoch.
-- **Cách ghi trong HCache:** file tạm, fsync, rename, fsync thư mục; khóa giống `persist.rs`. Không trộn vào file dữ liệu.
+- **Cách ghi trong Hotstash:** file tạm, fsync, rename, fsync thư mục; khóa giống `persist.rs`. Không trộn vào file dữ liệu.
 
 ### 7.2 Bảo mật
 
@@ -246,12 +246,12 @@ Sentinel không giúp được: Sentinel đổi vai bằng `REPLICAOF`, mà lệ
   - Chuyển slot nguyên tử `AUTH` trên cổng client và che mật khẩu (`cluster_migrateslots.c:95-98`, `:1208-1216`).
   - Garnet xác thực gossip bằng user riêng của cluster.
   - Dragonfly yêu cầu quyền ADMIN cho `DFLYCLUSTER`.
-- **Đề xuất cho HCache:**
+- **Đề xuất cho Hotstash:**
   - Bus chỉ bind vào giao diện nội bộ. Khi không cấu hình `bind`, từ chối mở bus ra ngoài; Valkey chỉ cảnh báo trường hợp này (`:1637`).
   - Có TLS cho bus, dựa trên `tls.rs`.
   - Các lệnh quản trị cluster (`SETSLOT`, `ADDSLOTS`, lệnh đẩy topology) thuộc nhóm `@admin` của ACL.
-  - Một phần mở rộng xác thực riêng của HCache (ví dụ HMAC với khóa chung) sẽ phá cluster trộn với Valkey, nên chỉ có thể là tùy chọn khi cả cluster là HCache. Xem câu hỏi mở.
-- **Kiểm gói tin.** Valkey kiểm độ dài từng loại gói và từng phần mở rộng trước khi đọc (`clusterIsValidPacket`, `:3990-4095`); phần mở rộng lạ thì ghi log rồi bỏ qua (`:3854-3856`). Bộ đọc gói của HCache phải fuzz ngay từ đầu, cùng mức với các đợt rà soát bảo mật trước.
+  - Một phần mở rộng xác thực riêng của Hotstash (ví dụ HMAC với khóa chung) sẽ phá cluster trộn với Valkey, nên chỉ có thể là tùy chọn khi cả cluster là Hotstash. Xem câu hỏi mở.
+- **Kiểm gói tin.** Valkey kiểm độ dài từng loại gói và từng phần mở rộng trước khi đọc (`clusterIsValidPacket`, `:3990-4095`); phần mở rộng lạ thì ghi log rồi bỏ qua (`:3854-3856`). Bộ đọc gói của Hotstash phải fuzz ngay từ đầu, cùng mức với các đợt rà soát bảo mật trước.
 - **Chế độ bảo vệ:** chưa kiểm Valkey có áp protected mode lên cổng bus hay không. **[chưa kiểm chứng]**
 
 ### 7.3 Các kiểu hỏng
@@ -259,7 +259,7 @@ Sentinel không giúp được: Sentinel đổi vai bằng `REPLICAOF`, mà lệ
 - **Split brain.** Primary nằm ở phía thiểu số vẫn nhận ghi tới khi hết `node-timeout`. Ghi trong khoảng đó mất sau khi phía đa số failover. Đây là hành vi của chính thuật toán Valkey, không phải lỗi cài đặt (kế hoạch, dòng 104). Phải nói rõ trong tài liệu người dùng.
 - **Va chạm epoch.** Hai primary cùng `configEpoch`: node có ID nhỏ hơn tự tăng epoch (`cluster_legacy.c:2692-2705`; Garnet chép lại ở `ClusterConfig.cs:1577-1602`).
 - **Node cũ quay lại với cấu hình cũ.** Gói UPDATE và `clusterUpdateSlotsConfigWith` sửa nó (`:5648`, `:3285`).
-- **Topology tĩnh (giai đoạn 1–2).** Bộ điều khiển đẩy hai cấu hình khác nhau cho hai node thì có hai chủ cho một slot. Dragonfly chỉ so cấu hình mới có giống cấu hình cũ không (`cluster_family.cc:566-569`). HCache nên kèm một số phiên bản tăng dần trong cấu hình đẩy vào, và từ chối bản cũ hơn.
+- **Topology tĩnh (giai đoạn 1–2).** Bộ điều khiển đẩy hai cấu hình khác nhau cho hai node thì có hai chủ cho một slot. Dragonfly chỉ so cấu hình mới có giống cấu hình cũ không (`cluster_family.cc:566-569`). Hotstash nên kèm một số phiên bản tăng dần trong cấu hình đẩy vào, và từ chối bản cũ hơn.
 
 ## 8. Kế hoạch theo giai đoạn
 
@@ -267,11 +267,11 @@ Sentinel không giúp được: Sentinel đổi vai bằng `REPLICAOF`, mà lệ
 
 | GĐ | Nội dung | Ngày | Test |
 |---|---|---|---|
-| 1. Bảng topology và chuyển hướng | Bảng node/slot theo mô hình Valkey; đọc file `nodes.conf` viết tay (`--cluster-config-file`); một lệnh đẩy topology nguyên khối, có phiên bản; `ADDSLOTS[RANGE]`, `DELSLOTS[RANGE]`, `SETSLOT … NODE`, `FLUSHSLOTS`, `REPLICATE` (mở `follow.rs`), `RESET`; `cluster::route` với `MOVED`/`CLUSTERDOWN`; cờ `READONLY`/`ASKING`; gỡ lệnh chặn khi đổi chủ slot; kiểm khóa trong script; `CLUSTER SLOTS/SHARDS/NODES/INFO` sinh từ bảng và cache; bộ đếm khóa theo slot | 14–18 | Unit: bảng quyết định chép từ các nhánh của `getNodeByQuery`; định dạng `SLOTS/SHARDS/NODES` so với Valkey. Tích hợp: 3 primary + 3 replica HCache với file tĩnh; redis-py `RedisCluster` và ioredis `Cluster` ghi/đọc 100k khóa trên mọi slot, pipeline, transaction có hash tag, `MOVED` sau khi đẩy topology mới, đọc replica với `READONLY`; `valkey-cli --cluster check`. Mở rộng `crates/hcache/tests/cluster.rs` |
-| 2. Chuyển slot kiểu cũ | `SETSLOT IMPORTING/MIGRATING/STABLE`; `MIGRATE` đủ cú pháp và cache socket; `RESTORE-ASKING`; `ASK`/`TRYAGAIN`; `GETKEYSINSLOT` không quét cả shard; xóa khóa của slot không còn sở hữu | 10–14 | `valkey-cli --cluster reshard/rebalance/fix` giữa các nút HCache, trong lúc redis-py và ioredis chạy tải ghi: không mất lần ghi nào đã được xác nhận, client đi theo `ASK`; `MIGRATE` HCache→Valkey và Valkey→HCache. **Điểm dừng: chủ dự án quyết có đi tiếp không** |
-| 3. Cluster bus tương thích Valkey | Codec nhị phân và fuzz; MEET/PING/PONG, gossip, các phần mở rộng, header light; PFAIL/FAIL; UPDATE; PUBLISH/PUBLISHSHARD; va chạm epoch; ghi `nodes.conf`; `FORGET` và blacklist; trạng thái cluster. Chưa có bầu chọn | 25–35 | `valkey-cli --cluster create/check/add-node/del-node`; cluster trộn 3 Valkey 9.1.3 + 3 HCache. Valkey `tests/unit/cluster`: `cluster-slots`, `cluster-shards`, `cluster-nodes-slots`, `cluster-multiple-meets`, `cluster-reliable-meet`, `packet`, `links`, `info`, `hostnames`, `multidb`, `pubsub`, `sharded-pubsub`, `faildet`, `failure-marking`, `update-msg` |
+| 1. Bảng topology và chuyển hướng | Bảng node/slot theo mô hình Valkey; đọc file `nodes.conf` viết tay (`--cluster-config-file`); một lệnh đẩy topology nguyên khối, có phiên bản; `ADDSLOTS[RANGE]`, `DELSLOTS[RANGE]`, `SETSLOT … NODE`, `FLUSHSLOTS`, `REPLICATE` (mở `follow.rs`), `RESET`; `cluster::route` với `MOVED`/`CLUSTERDOWN`; cờ `READONLY`/`ASKING`; gỡ lệnh chặn khi đổi chủ slot; kiểm khóa trong script; `CLUSTER SLOTS/SHARDS/NODES/INFO` sinh từ bảng và cache; bộ đếm khóa theo slot | 14–18 | Unit: bảng quyết định chép từ các nhánh của `getNodeByQuery`; định dạng `SLOTS/SHARDS/NODES` so với Valkey. Tích hợp: 3 primary + 3 replica Hotstash với file tĩnh; redis-py `RedisCluster` và ioredis `Cluster` ghi/đọc 100k khóa trên mọi slot, pipeline, transaction có hash tag, `MOVED` sau khi đẩy topology mới, đọc replica với `READONLY`; `valkey-cli --cluster check`. Mở rộng `crates/hotstash/tests/cluster.rs` |
+| 2. Chuyển slot kiểu cũ | `SETSLOT IMPORTING/MIGRATING/STABLE`; `MIGRATE` đủ cú pháp và cache socket; `RESTORE-ASKING`; `ASK`/`TRYAGAIN`; `GETKEYSINSLOT` không quét cả shard; xóa khóa của slot không còn sở hữu | 10–14 | `valkey-cli --cluster reshard/rebalance/fix` giữa các nút Hotstash, trong lúc redis-py và ioredis chạy tải ghi: không mất lần ghi nào đã được xác nhận, client đi theo `ASK`; `MIGRATE` Hotstash→Valkey và Valkey→Hotstash. **Điểm dừng: chủ dự án quyết có đi tiếp không** |
+| 3. Cluster bus tương thích Valkey | Codec nhị phân và fuzz; MEET/PING/PONG, gossip, các phần mở rộng, header light; PFAIL/FAIL; UPDATE; PUBLISH/PUBLISHSHARD; va chạm epoch; ghi `nodes.conf`; `FORGET` và blacklist; trạng thái cluster. Chưa có bầu chọn | 25–35 | `valkey-cli --cluster create/check/add-node/del-node`; cluster trộn 3 Valkey 9.1.3 + 3 Hotstash. Valkey `tests/unit/cluster`: `cluster-slots`, `cluster-shards`, `cluster-nodes-slots`, `cluster-multiple-meets`, `cluster-reliable-meet`, `packet`, `links`, `info`, `hostnames`, `multidb`, `pubsub`, `sharded-pubsub`, `faildet`, `failure-marking`, `update-msg` |
 | 4. Failover trong cluster | Bầu chọn, phiếu, NACK, `lastVoteEpoch` bền vững, hạng replica, `cluster-replica-validity-factor`; `CLUSTER FAILOVER [FORCE\|TAKEOVER]` với MFSTART và tạm dừng ghi | 12–18 | `failover`, `failover2`, `manual-failover`, `manual-takeover`, `faster-failover`, `failover-nack`, `replica-priority`, `no-failover-option`, `slave-selection`; kịch bản kill và chia mạng trên WSL2 có tải client, đếm số lần ghi mất, so với cùng kịch bản trên Valkey |
-| 5. Chuyển slot nguyên tử | `CLUSTER MIGRATESLOTS/SYNCSLOTS/GETSLOTMIGRATIONS/CANCELSLOTMIGRATIONS`, tương thích ở mức lệnh `SYNCSLOTS`; snapshot theo shard không fork; lọc dòng ghi theo slot; bước chốt | 15–20 | `cluster-migrateslots`, `many-slot-migration`, `pubsubshard-slot-migration`; `valkey-cli --cluster reshard --cluster-use-atomic-slot-migration`; chuyển HCache↔Valkey cả hai chiều |
+| 5. Chuyển slot nguyên tử | `CLUSTER MIGRATESLOTS/SYNCSLOTS/GETSLOTMIGRATIONS/CANCELSLOTMIGRATIONS`, tương thích ở mức lệnh `SYNCSLOTS`; snapshot theo shard không fork; lọc dòng ghi theo slot; bước chốt | 15–20 | `cluster-migrateslots`, `many-slot-migration`, `pubsubshard-slot-migration`; `valkey-cli --cluster reshard --cluster-use-atomic-slot-migration`; chuyển Hotstash↔Valkey cả hai chiều |
 | | **Tổng** | **76–105** | |
 
 Ngoài phạm vi (ghi rõ để không trôi):
@@ -286,19 +286,19 @@ Ngoài phạm vi (ghi rõ để không trôi):
 ### Rủi ro
 
 1. **Đúng đắn của phần phân tán.** Lỗi bầu chọn, epoch, hoặc fsync `nodes.conf` chỉ lộ ra khi mạng bị chia hay node chết đúng lúc. Ngay thuật toán gốc cũng có thể mất ghi đã xác nhận. Cách giảm: chạy bộ test của Valkey, thêm kịch bản tiêm lỗi, và luôn so với Valkey trên cùng kịch bản.
-2. **Định dạng bus thay đổi theo bản Valkey.** Header light, phần mở rộng, NACK là các phần đã được thêm vào định dạng gốc (`cluster_legacy.h:175-186`, `:243-252`, `:427-433`); thời điểm thêm từng phần tôi chưa kiểm. HCache phải theo từng bản minor. Cách giảm: chốt một bản Valkey để đối chiếu (9.1.3); bỏ qua phần mở rộng lạ như Valkey; CI có cluster trộn.
+2. **Định dạng bus thay đổi theo bản Valkey.** Header light, phần mở rộng, NACK là các phần đã được thêm vào định dạng gốc (`cluster_legacy.h:175-186`, `:243-252`, `:427-433`); thời điểm thêm từng phần tôi chưa kiểm. Hotstash phải theo từng bản minor. Cách giảm: chốt một bản Valkey để đối chiếu (9.1.3); bỏ qua phần mở rộng lạ như Valkey; CI có cluster trộn.
 3. **Không có fork.** Snapshot slot và full sync phải giữ khóa shard hoặc dừng cả node (`engine.rs:1377-1379`). Trong cluster, replica mới và failover xảy ra thường hơn, nên trễ đuôi khi chuyển slot hoặc full sync sẽ lộ rõ hơn. Phải đo ngay ở giai đoạn 2.
 4. Chỉ mục theo slot thêm chi phí vào đường nóng (thêm/xóa khóa).
-5. Ước lượng còn thô. Phần bus là mã mới hoàn toàn, chưa có tiền lệ trong HCache.
+5. Ước lượng còn thô. Phần bus là mã mới hoàn toàn, chưa có tiền lệ trong Hotstash.
 
 ### Câu hỏi cho chủ dự án
 
 1. Topology tĩnh cộng bộ điều khiển bên ngoài (giai đoạn 1–2) có đủ cho nhóm người dùng đầu không? Hay `valkey-cli --cluster create` phải chạy ngay? Câu trả lời quyết định giai đoạn 3 có nằm trước 1.0 không.
 2. Lệnh đẩy topology: lấy tên và định dạng nào? Tôi đề xuất một lệnh riêng nhận đúng văn bản `nodes.conf` kèm số phiên bản (tên dự kiến `HCLUSTER SETCONFIG`), thay vì JSON như Dragonfly.
-3. Ở giai đoạn 1–2, ai là bộ điều khiển? Viết một công cụ nhỏ `hcache-cluster`, hay chỉ viết tài liệu thao tác tay?
-4. Cluster trộn Valkey + HCache là cấu hình được hỗ trợ, hay chỉ dùng để test?
+3. Ở giai đoạn 1–2, ai là bộ điều khiển? Viết một công cụ nhỏ `hotstash-cluster`, hay chỉ viết tài liệu thao tác tay?
+4. Cluster trộn Valkey + Hotstash là cấu hình được hỗ trợ, hay chỉ dùng để test?
 5. Chấp nhận thêm khoảng 8–16 byte mỗi khóa cho chỉ mục theo slot nếu bộ đếm và duyệt theo đoạn không đủ nhanh không? **[con số là suy luận]**
-6. Có muốn xác thực bus riêng của HCache không, biết rằng bật nó thì không trộn với Valkey được?
+6. Có muốn xác thực bus riêng của Hotstash không, biết rằng bật nó thì không trộn với Valkey được?
 7. Ở giai đoạn 1–2, `PUBLISH`/`SPUBLISH` chỉ tới subscriber cục bộ. Chấp nhận giới hạn này tới khi có bus không?
 
 ### Câu trả lời mặc định
@@ -307,8 +307,8 @@ Chủ dự án để tôi quyết (2026-11-17). Nếu chưa có câu trả lời
 
 1. Topology tĩnh đủ cho bản đầu. Bus (giai đoạn 3) quyết sau điểm dừng của giai đoạn 2.
 2. Dùng `HCLUSTER SETCONFIG <phiên bản> <văn bản nodes.conf>`. Phiên bản nhỏ hơn hoặc bằng phiên bản đang giữ thì bị từ chối.
-3. Chỉ viết tài liệu thao tác tay kèm file mẫu cho 3 primary + 3 replica. Chưa viết công cụ `hcache-cluster`.
-4. Cluster trộn Valkey + HCache chỉ dùng để test, cho tới khi xong giai đoạn 4 và qua bộ test cluster của Valkey.
+3. Chỉ viết tài liệu thao tác tay kèm file mẫu cho 3 primary + 3 replica. Chưa viết công cụ `hotstash-cluster`.
+4. Cluster trộn Valkey + Hotstash chỉ dùng để test, cho tới khi xong giai đoạn 4 và qua bộ test cluster của Valkey.
 5. Làm bộ đếm khóa theo slot trước và đo. Chỉ thêm chỉ mục theo slot nếu đo thấy cần, và chỉ khi bật chế độ cluster.
 6. Không có xác thực bus riêng. Bảo vệ bus như Valkey: mạng riêng và TLS.
 7. Chấp nhận, và ghi rõ giới hạn này trong README.

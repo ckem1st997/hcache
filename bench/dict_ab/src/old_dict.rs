@@ -1,4 +1,4 @@
-// The table `hcache-core` used before the bucket one, kept only for this
+// The table `hotstash-core` used before the bucket one, kept only for this
 // comparison. One change: its LFU step multiplies instead of dividing, as
 // the current table does, so that only the layout differs.
 

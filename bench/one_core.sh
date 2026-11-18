@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Spike A, 1-core investigation: HCache against Valkey on one pinned vCPU,
+# Spike A, 1-core investigation: Hotstash against Valkey on one pinned vCPU,
 # with and without a log, and with only reads or only writes. Pipeline 16,
 # where the server's own CPU cost decides the result.
 #
-# Usage: bench/one_core.sh VALKEY_SERVER HCACHE_SERVER HLOAD [extra hcache flags...]
+# Usage: bench/one_core.sh VALKEY_SERVER HOTSTASH_SERVER HLOAD [extra hotstash flags...]
 set -euo pipefail
 
 VALKEY=$1
-HCACHE=$2
+HOTSTASH=$2
 HLOAD=$3
 shift 3
 EXTRA=("$@")
@@ -36,12 +36,12 @@ run() { # server log write_pct
             taskset -c 0 "$VALKEY" --port $port --bind 127.0.0.1 --save "" "${aof[@]}" \
                 --io-threads 1 --logfile "$WORK/valkey.log" >/dev/null 2>&1 &
             ;;
-        hcache)
+        hotstash)
             port=6380
             local data=()
             [ "$2" = log ] && data=(--data "$WORK/data/data.hc")
-            taskset -c 0 "$HCACHE" --port $port --bind 127.0.0.1 --workers 1 "${data[@]}" "${EXTRA[@]}" \
-                >"$WORK/hcache.log" 2>&1 &
+            taskset -c 0 "$HOTSTASH" --port $port --bind 127.0.0.1 --workers 1 "${data[@]}" "${EXTRA[@]}" \
+                >"$WORK/hotstash.log" 2>&1 &
             ;;
     esac
     PID=$!
@@ -57,6 +57,6 @@ run() { # server log write_pct
 for log in nolog log; do
     for w in 0 10 100; do
         run valkey $log $w
-        run hcache $log $w
+        run hotstash $log $w
     done
 done

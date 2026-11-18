@@ -6,5 +6,5 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-hcache-core = { path = "../hcache-core" }
-hcache = { path = "../hcache" }
+hotstash-core = { path = "../hotstash-core" }
+hotstash = { path = "../hotstash" }

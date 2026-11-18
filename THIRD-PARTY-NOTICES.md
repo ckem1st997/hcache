@@ -1,6 +1,6 @@
 # Third-party notices
 
-HCache is licensed under the Apache License 2.0 (see `LICENSE`). Parts of it are derived from the projects below. Their licences require the notices that follow to be kept with the source.
+Hotstash is licensed under the Apache License 2.0 (see `LICENSE`). Parts of it are derived from the projects below. Their licences require the notices that follow to be kept with the source.
 
 Dependencies pulled in through Cargo carry their own licences in their crates.
 
@@ -8,7 +8,7 @@ Dependencies pulled in through Cargo carry their own licences in their crates.
 
 <https://github.com/valkey-io/valkey>
 
-Command arity, flags and ACL categories in `crates/hcache-core/src/cmdtable.rs`, and the wording of replies and error messages, follow Valkey 9.1.3. The sparse HyperLogLog updates in `crates/hcache-core/src/hll.rs` follow its `hyperloglog.c`. The test fixture `crates/hcache/tests/fixtures/valkey-9.1.3.rdb` was written by Valkey 9.1.3.
+Command arity, flags and ACL categories in `crates/hotstash-core/src/cmdtable.rs`, and the wording of replies and error messages, follow Valkey 9.1.3. The sparse HyperLogLog updates in `crates/hotstash-core/src/hll.rs` follow its `hyperloglog.c`. The test fixture `crates/hotstash/tests/fixtures/valkey-9.1.3.rdb` was written by Valkey 9.1.3.
 
 ```text
 BSD 3-Clause License
@@ -47,7 +47,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 <https://github.com/valkey-io/valkey-json>
 
-`crates/hcache-core/src/json/path.rs` is ported from its `selector.cc`, and `crates/hcache/tests/json_upstream.rs` ports its test vectors.
+`crates/hotstash-core/src/json/path.rs` is ported from its `selector.cc`, and `crates/hotstash/tests/json_upstream.rs` ports its test vectors.
 
 ```text
 BSD 3-Clause License
@@ -84,7 +84,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 <https://github.com/valkey-io/valkey-bloom>
 
-`crates/hcache-core/src/bloom.rs` follows its filter sizing, scaling, encodings and error messages so that replies and RDB data match it.
+`crates/hotstash-core/src/bloom.rs` follows its filter sizing, scaling, encodings and error messages so that replies and RDB data match it.
 
 ```text
 BSD 3-Clause License
@@ -105,7 +105,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 
 <https://github.com/night-shift/fpconv>, as Valkey ships it in `deps/fpconv`
 
-`crates/hcache-core/src/fpconv.rs` is ported from its `fpconv_dtoa.c` and `fpconv_powers.h`, so sorted-set scores print as Valkey prints them.
+`crates/hotstash-core/src/fpconv.rs` is ported from its `fpconv_dtoa.c` and `fpconv_powers.h`, so sorted-set scores print as Valkey prints them.
 
 ```text
 Copyright (c) 2013-2019, night-shift <as.smljk at gmail dot com>
@@ -141,7 +141,7 @@ DEALINGS IN THE SOFTWARE.
 
 <https://github.com/jedisct1/rust-bloom-filter>
 
-`crates/hcache-core/src/bloom.rs` reproduces its bitmap sizing and hashing, which valkey-bloom uses.
+`crates/hotstash-core/src/bloom.rs` reproduces its bitmap sizing and hashing, which valkey-bloom uses.
 
 ```text
 Copyright (c) 2013-2024, Frank Denis
@@ -173,7 +173,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 <https://github.com/jedisct1/rust-siphash>
 
-`crates/hcache-core/src/bloom.rs` implements SipHash-1-3 as this crate computes it.
+`crates/hotstash-core/src/bloom.rs` implements SipHash-1-3 as this crate computes it.
 
 ```text
 Copyright 2012-2016 The Rust Project Developers.

@@ -1,6 +1,6 @@
-# JSON.* trong HCache: tập con JSONPath hỗ trợ và chỗ khác valkey-json
+# JSON.* trong Hotstash: tập con JSONPath hỗ trợ và chỗ khác valkey-json
 
-HCache làm JSON.* theo valkey-json 1.0/1.1: cùng tên lệnh, cờ, nhóm ACL, cấu hình, cú pháp đường dẫn, câu trả lời và chuỗi lỗi. Kiểu dữ liệu tên `ReJSON-RL`, RDB module ID `0x45e25238df912c03` (encver 3), nên file RDB và `DUMP`/`RESTORE` qua lại được với Valkey có nạp valkey-json.
+Hotstash làm JSON.* theo valkey-json 1.0/1.1: cùng tên lệnh, cờ, nhóm ACL, cấu hình, cú pháp đường dẫn, câu trả lời và chuỗi lỗi. Kiểu dữ liệu tên `ReJSON-RL`, RDB module ID `0x45e25238df912c03` (encver 3), nên file RDB và `DUMP`/`RESTORE` qua lại được với Valkey có nạp valkey-json.
 
 Nguồn: mã nguồn valkey-json (`src/json/selector.cc`, `json.cc`, `dom.cc`) và bộ test `tst/integration/test_json_basic.py`, chỉ đọc chứ chưa chạy module thật; chi tiết từng lệnh ở [json-spec.md](json-spec.md). Phần RedisJSON lấy từ tài liệu redis.io.
 
@@ -70,14 +70,14 @@ Các cú pháp sau của RedisJSON hoặc JSONPath đầy đủ **không** có, 
 | Độ sâu đệ quy khi phân tích đường (bộ lọc lồng, hợp) | 200 | `LIMIT Parser recursion depth is exceeded` |
 | Độ sâu lồng của tài liệu | `json.max-path-limit`, mặc định 128 | `LIMIT Document path nesting limit is exceeded` |
 | Kích thước tài liệu | `json.max-document-size`, mặc định 0 = không giới hạn | `LIMIT Document size limit is exceeded` |
-| Công sức của một lần tìm theo đường (chỉ HCache) | 2^20 lần chạy phần còn lại của đường từ một giá trị, cộng 4 lần mỗi giá trị trong tài liệu; tính cả đường `$` trong bộ lọc | `LIMIT Path search work limit is exceeded` |
-| Độ sâu cộng dồn của các lượt `..` lồng nhau (chỉ HCache) | 2048 | `LIMIT Parser recursion depth is exceeded` |
-| Câu trả lời của `JSON.GET`, `JSON.MGET` (chỉ HCache) | 512 MiB, như `proto-max-bulk-len` | `LIMIT Reply size limit is exceeded` |
-| Phần một lệnh ghi thêm vào tài liệu (chỉ HCache) | 512 MiB, mọi bản sao cộng lại, kể cả khi `json.max-document-size` là 0 | `LIMIT Document size limit is exceeded` |
+| Công sức của một lần tìm theo đường (chỉ Hotstash) | 2^20 lần chạy phần còn lại của đường từ một giá trị, cộng 4 lần mỗi giá trị trong tài liệu; tính cả đường `$` trong bộ lọc | `LIMIT Path search work limit is exceeded` |
+| Độ sâu cộng dồn của các lượt `..` lồng nhau (chỉ Hotstash) | 2048 | `LIMIT Parser recursion depth is exceeded` |
+| Câu trả lời của `JSON.GET`, `JSON.MGET` (chỉ Hotstash) | 512 MiB, như `proto-max-bulk-len` | `LIMIT Reply size limit is exceeded` |
+| Phần một lệnh ghi thêm vào tài liệu (chỉ Hotstash) | 512 MiB, mọi bản sao cộng lại, kể cả khi `json.max-document-size` là 0 | `LIMIT Document size limit is exceeded` |
 
 Cả hai cấu hình đọc và đặt bằng `CONFIG GET/SET`. Trên replica các giới hạn tài liệu không áp (lệnh từ master luôn được nhận), như valkey-json.
 
-Bốn giới hạn "chỉ HCache" có từ lượt rà bảo mật đợt 3:
+Bốn giới hạn "chỉ Hotstash" có từ lượt rà bảo mật đợt 3:
 - **Công sức tìm.** Mỗi `..` chạy phần còn lại của đường từ mọi giá trị bên dưới, nên `..` sau `..` nhân lên. Trên một tài liệu sâu 100 tầng, `$..a..a..a..a..a..a..a..a` cần khoảng 10^11 lượt và giữ một shard hàng giờ; valkey-json cũng vậy. Đường thường (một `..`, `[*]`, bộ lọc) tốn cỡ số giá trị trong tài liệu, không chạm giới hạn này.
 - **Câu trả lời.** `INDENT`, `NEWLINE`, `SPACE` lặp lại theo từng giá trị và từng tầng, nên một `INDENT` dài trên tài liệu nhỏ đủ dựng câu trả lời hàng chục GB và làm tiến trình chết vì hết bộ nhớ.
 - **Bản sao.** `JSON.SET k '$[*]' <giá trị>` chép giá trị vào mọi chỗ khớp. Trước đây giới hạn kích thước chỉ tính một bản; nay tính đủ số chỗ khớp ở `JSON.SET`, `JSON.MSET`, `JSON.MERGE`, `JSON.STRAPPEND`, `JSON.ARRAPPEND`, `JSON.ARRINSERT`.
@@ -100,11 +100,11 @@ Bốn giới hạn "chỉ HCache" có từ lượt rà bảo mật đợt 3:
 - `$..a` có chỗ khớp lồng nhau: sửa tổ tiên trước, chỗ con đã bị thay thì bỏ qua (`{"a":{"a":1}}` thành `{"a":5}`).
 - Lệnh ghi nào cũng kiểm tra hết trước khi đổi; bị từ chối thì tài liệu giữ nguyên.
 
-## 8. Chỗ HCache khác valkey-json
+## 8. Chỗ Hotstash khác valkey-json
 
 Các điểm dưới đây tìm ra khi đọc mã nguồn valkey-json; chưa đối chiếu với module chạy thật.
 
-| Chỗ | valkey-json | HCache | Vì sao |
+| Chỗ | valkey-json | Hotstash | Vì sao |
 |---|---|---|---|
 | Độ lồng tối đa | chỉ theo `json.max-path-limit` | thêm trần cứng 1024 tầng; đặt `json.max-path-limit` lớn hơn cũng như 1024 | chặn tràn ngăn xếp khi đọc, ghi, giải phóng tài liệu |
 | Thêm nhiều member trong một lệnh (`$['x','y']` khi cả hai chưa có) | thứ tự theo `unordered_set` (thứ tự băm) | theo thứ tự trong đường dẫn | thứ tự xác định |
@@ -121,7 +121,7 @@ Các điểm dưới đây tìm ra khi đọc mã nguồn valkey-json; chưa đ�
 | RDB encver 0 và 1 (bản rất cũ) | nạp được | không nạp | chỉ ghi và đọc encver 3 |
 | Đặt `json.max-document-size` khác 0 | cỡ tài liệu theo dõi sẵn qua bộ cấp phát, O(1) | mỗi lệnh ghi tính lại cỡ cả tài liệu, O(n) | chưa giữ cỡ cộng dồn |
 | Lệnh ghi không đổi gì (ví dụ `JSON.DEL k $.x` khi không có `x`) | vẫn replicate và phát `json.del` | như valkey-json, và WATCH cũng coi khoá đã đổi | |
-| File snapshot riêng của HCache (`persist`) | không có | lưu văn bản JSON gọn | RDB vẫn đúng định dạng valkey-json |
+| File snapshot riêng của Hotstash (`persist`) | không có | lưu văn bản JSON gọn | RDB vẫn đúng định dạng valkey-json |
 
 Thêm: số nguyên giữ dạng `i64`; số thực giữ nguyên văn bản như khi ghi (giống valkey-json); object giữ thứ tự thêm, khoá trùng khi đọc giữ vị trí đầu và giá trị sau.
 

@@ -1,12 +1,12 @@
-﻿// HCache spike against StackExchange.Redis. Every check runs; nothing aborts the run.
+﻿// Hotstash spike against StackExchange.Redis. Every check runs; nothing aborts the run.
 // Checks named x_* use Redis features outside the spike's scope; they are not expected to pass.
 using System.Reflection;
 using System.Text;
 using StackExchange.Redis;
 
-int port = int.Parse(Environment.GetEnvironmentVariable("HCACHE_PORT") ?? "6400");
-string? proto = Environment.GetEnvironmentVariable("HCACHE_PROTO");
-bool logHandshake = Environment.GetEnvironmentVariable("HCACHE_LOG") == "1";
+int port = int.Parse(Environment.GetEnvironmentVariable("HOTSTASH_PORT") ?? "6400");
+string? proto = Environment.GetEnvironmentVariable("HOTSTASH_PROTO");
+bool logHandshake = Environment.GetEnvironmentVariable("HOTSTASH_LOG") == "1";
 const string P = "cs:";
 var failed = new List<string>();
 
@@ -181,7 +181,7 @@ void DelExistsUnlink()
 void KeysPattern()
 {
     db.StringSet(new KeyValuePair<RedisKey, RedisValue>[] { new(K("k:1"), "a"), new(K("k:2"), "b"), new(K("k:x["), "c") });
-    // IServer.Keys (SCAN or KEYS decided by the library; see HCACHE_LOG / report).
+    // IServer.Keys (SCAN or KEYS decided by the library; see HOTSTASH_LOG / report).
     Eq(server.Keys(pattern: P + "k:?").Select(k => (string)k!).Order(StringComparer.Ordinal), new[] { P + "k:1", P + "k:2" });
     Eq(server.Keys(pattern: P + "k:x\\[").Select(k => (string)k!), new[] { P + "k:x[" });
     Eq(server.Keys(pattern: P + "nothing*").Count(), 0);

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Cost per command of each part of a server's path, 1 vCPU, pipeline 16,
-# 100k keys. BIN is an HCache binary or the word "valkey".
+# 100k keys. BIN is an Hotstash binary or the word "valkey".
 . ~/.cargo/env
 P=/usr/lib/linux-tools/6.8.0-149-generic/perf
 cd /root/spike

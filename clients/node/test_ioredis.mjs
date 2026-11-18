@@ -1,10 +1,10 @@
-// HCache spike against ioredis. Mirrors clients/python/test_client.py check for check.
+// Hotstash spike against ioredis. Mirrors clients/python/test_client.py check for check.
 import { randomBytes } from "node:crypto";
 import Redis from "ioredis";
 import { PORT, PROTO, eq, ok, raises, run, version } from "./harness.mjs";
 
 const P = "io:";
-// ioredis speaks RESP2 only; HCACHE_PROTO is reported but cannot change the wire protocol.
+// ioredis speaks RESP2 only; HOTSTASH_PROTO is reported but cannot change the wire protocol.
 const opts = { port: PORT, host: "127.0.0.1", connectTimeout: 30_000, maxRetriesPerRequest: 1 };
 const r = new Redis(opts);
 r.on("error", () => {}); // errors surface through the failing command

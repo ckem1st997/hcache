@@ -1,4 +1,4 @@
-// HCache spike against node-redis. Mirrors clients/python/test_client.py check for check.
+// Hotstash spike against node-redis. Mirrors clients/python/test_client.py check for check.
 import { randomBytes } from "node:crypto";
 import { createClient, defineScript, RESP_TYPES } from "redis";
 import { PORT, PROTO, eq, ok, raises, run, version } from "./harness.mjs";

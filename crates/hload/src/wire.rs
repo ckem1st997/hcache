@@ -1,7 +1,7 @@
 //! Client side of RESP for the load generator: count replies without
 //! building them, however the bytes are split across reads.
 
-use hcache_core::resp::{decode_reply, Reply};
+use hotstash_core::resp::{decode_reply, Reply};
 use std::io::{self, Read};
 use std::net::TcpStream;
 
@@ -116,7 +116,7 @@ pub fn read_reply(stream: &mut TcpStream) -> io::Result<Reply> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hcache_core::testutil::Rng;
+    use hotstash_core::testutil::Rng;
 
     fn sample() -> (Vec<u8>, usize, usize) {
         let replies = [

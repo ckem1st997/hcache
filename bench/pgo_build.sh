@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Builds hcache-server with profile-guided optimisation (Linux): a build
+# Builds hotstash-server with profile-guided optimisation (Linux): a build
 # that records which branches and functions are hot runs a training load
 # from hload, then the release build is laid out from that profile.
 #
 #   bash bench/pgo_build.sh [OUT]      (from spike/; OUT defaults to
-#                                       target/pgo/hcache-server)
+#                                       target/pgo/hotstash-server)
 #
 # Needs the llvm-tools rustup component for llvm-profdata. The training
 # server listens on 127.0.0.1:6385 for a minute or so.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-OUT=${1:-target/pgo/hcache-server}
+OUT=${1:-target/pgo/hotstash-server}
 PORT=6385
 WORK=target/pgo-work
 rustup component add llvm-tools >/dev/null
@@ -19,12 +19,12 @@ PROFDATA=$(find "$(rustc --print sysroot)" -name llvm-profdata -type f | head -1
 rm -rf "$WORK/profiles" && mkdir -p "$WORK/profiles" "$(dirname "$OUT")"
 cargo build -q --release --locked -p hload
 RUSTFLAGS="-Cprofile-generate=$PWD/$WORK/profiles" \
-    cargo build -q --release --locked -p hcache-server --target-dir "$WORK/gen"
-"$WORK/gen/release/hcache-server" --port $PORT --workers 1 >/dev/null 2>&1 &
+    cargo build -q --release --locked -p hotstash-server --target-dir "$WORK/gen"
+"$WORK/gen/release/hotstash-server" --port $PORT --workers 1 >/dev/null 2>&1 &
 pid=$!
 trap 'kill $pid 2>/dev/null || true' EXIT
 for _ in $(seq 50); do
-    "$WORK/gen/release/hcache-server" healthcheck --port $PORT 2>/dev/null && break
+    "$WORK/gen/release/hotstash-server" healthcheck --port $PORT 2>/dev/null && break
     sleep 0.1
 done
 H=target/release/hload
@@ -44,6 +44,6 @@ kill $pid && wait $pid || true
 trap - EXIT
 "$PROFDATA" merge -o "$WORK/merged.profdata" "$WORK"/profiles/*.profraw
 RUSTFLAGS="-Cprofile-use=$PWD/$WORK/merged.profdata" \
-    cargo build -q --release --locked -p hcache-server --target-dir "$WORK/use"
-cp "$WORK/use/release/hcache-server" "$OUT"
+    cargo build -q --release --locked -p hotstash-server --target-dir "$WORK/use"
+cp "$WORK/use/release/hotstash-server" "$OUT"
 echo "built $OUT"

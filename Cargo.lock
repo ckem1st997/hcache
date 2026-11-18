@@ -152,17 +152,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "hcache"
+name = "hload"
 version = "0.0.0"
 dependencies = [
- "hcache-core",
- "hcache-server",
+ "hotstash",
+ "hotstash-core",
+]
+
+[[package]]
+name = "hotstash"
+version = "0.0.0"
+dependencies = [
+ "hotstash-core",
+ "hotstash-server",
  "rustls",
  "xxhash-rust",
 ]
 
 [[package]]
-name = "hcache-core"
+name = "hotstash-core"
 version = "0.0.0"
 dependencies = [
  "crossbeam-queue",
@@ -178,25 +186,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "hcache-server"
+name = "hotstash-server"
 version = "0.0.0"
 dependencies = [
  "crossbeam-channel",
  "crossbeam-queue",
  "crossbeam-utils",
- "hcache-core",
+ "hotstash-core",
  "libc",
  "mio",
  "rustls",
  "xxhash-rust",
-]
-
-[[package]]
-name = "hload"
-version = "0.0.0"
-dependencies = [
- "hcache",
- "hcache-core",
 ]
 
 [[package]]

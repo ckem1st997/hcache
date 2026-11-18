@@ -1,4 +1,4 @@
-// HCache spike against go-redis. Every check runs; nothing aborts the run.
+// Hotstash spike against go-redis. Every check runs; nothing aborts the run.
 //
 // Checks named x_* use Redis features outside the spike's scope; they show
 // what a real application would hit, they are not expected to pass.
@@ -28,8 +28,8 @@ const (
 
 var (
 	ctx    = context.Background()
-	port   = envOr("HCACHE_PORT", "6400")
-	proto  = os.Getenv("HCACHE_PROTO")
+	port   = envOr("HOTSTASH_PORT", "6400")
+	proto  = os.Getenv("HOTSTASH_PROTO")
 	failed []string
 	r      *redis.Client
 )

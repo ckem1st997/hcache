@@ -1,13 +1,13 @@
 //! Load generator for the Spike A bad cases. Speaks plain RESP over TCP,
-//! so the same scenarios run against HCache and against Valkey. `embedded`
-//! is the exception: it drives HCache in-process.
+//! so the same scenarios run against Hotstash and against Valkey. `embedded`
+//! is the exception: it drives Hotstash in-process.
 
 mod hist;
 mod wire;
 
-use hcache_core::resp::{encode_command, Reply};
-use hcache_core::testutil::Rng;
 use hist::Hist;
+use hotstash_core::resp::{encode_command, Reply};
+use hotstash_core::testutil::Rng;
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
@@ -448,11 +448,11 @@ fn eval(c: &Common) -> io::Result<()> {
 fn embedded(c: &Common, o: &Opts) -> Result<(), String> {
     let threads: usize = o.get("threads", 64)?;
     let shards: usize = o.get("shards", 64)?;
-    let db = hcache::Db::open(
+    let db = hotstash::Db::open(
         None,
-        hcache::Config {
+        hotstash::Config {
             shards,
-            ..hcache::Config::default()
+            ..hotstash::Config::default()
         },
     )
     .map_err(|e| e.to_string())?;
@@ -686,7 +686,7 @@ fn main() -> ExitCode {
         match scenario.as_str() {
             "baseline" => baseline(&c, "key:").map_err(io),
             "scan" => scan(&c, &o),
-            // Needs `--hash-tags` on the HCache side; a standalone Valkey
+            // Needs `--hash-tags` on the Hotstash side; a standalone Valkey
             // has one keyspace and ignores tags.
             "hashtag" => baseline(&c, "{hot}:").map_err(io),
             "eval" => eval(&c).map_err(io),

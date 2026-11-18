@@ -1,4 +1,4 @@
-# Bloom filter commands: behaviour spec for HCache (target: valkey-bloom 1.0.1)
+# Bloom filter commands: behaviour spec for Hotstash (target: valkey-bloom 1.0.1)
 
 Written 2026-11-17. Target: **valkey-bloom 1.0.1** (latest release, tag `1.0.1`, commit `43b4e70`, released 2026-02-23 per `00-RELEASENOTES`), the official Valkey module. RedisBloom differences are in section 13.
 
@@ -53,7 +53,7 @@ Registration (`VB: src/lib.rs:117-125`), format `[name, handler, flags, first_ke
 
 - ACL category `bloom` is created with `acl_categories: ["bloom"]` (`VB: src/lib.rs:113-115`). `COMMAND LIST FILTERBY ACLCAT bloom` lists all nine. A user with `-@bloom` gets "has no permissions to run the 'BF.ADD' command" (`TEST: tests/test_bloom_acl_category.py:60-83`).
 - **Arity as the server sees it is -1 for every command** (`TEST: tests/test_bloom_command.py:6-15`, which checks 8 of the 9; BF.LOAD is not checked). Each handler does its own argument count check. The `src/commands/*.json` files declare arities 3, 3, 3, 3, 2, -4, -2, -2, 3 for ADD, MADD, EXISTS, MEXISTS, CARD, RESERVE, INFO, INSERT, LOAD (`VB: src/commands/bf.*.json`). The tests show the runtime value is -1, so the JSON is documentation only.
-- Consequence for HCache: the server-level arity check never fires. Wrong-arg-count errors come from the handlers, in the order "OOM and ACL checks first, then arity". The text is the standard one with the registered upper-case name: `ERR wrong number of arguments for 'BF.ADD' command` (`TEST: tests/test_bloom_command.py:75-111`; a lowercase `bf.card` still reports `'BF.CARD'`).
+- Consequence for Hotstash: the server-level arity check never fires. Wrong-arg-count errors come from the handlers, in the order "OOM and ACL checks first, then arity". The text is the standard one with the registered upper-case name: `ERR wrong number of arguments for 'BF.ADD' command` (`TEST: tests/test_bloom_command.py:75-111`; a lowercase `bf.card` still reports `'BF.CARD'`).
 - `deny-oom` means that under `maxmemory` pressure the write commands are rejected by the server with `OOM command not allowed when used memory > 'maxmemory'.` (`TEST: tests/test_bloom_basic.py:131-142`). BF.EXISTS, BF.INFO and BF.CARD are unaffected.
 
 ---
@@ -192,7 +192,7 @@ Replies below are RESP2, with RESP3 differences stated in section 5. "Err" is an
 - Arity: exactly 3. Wrong type gives WRONGTYPE. Key exists gives **`BUSYKEY Target key name already exists.`** (a different error from BF.RESERVE's `item exists`).
 - Decodes the blob produced by AOF rewrite (section 10.3), creates the key, and replies `+OK`. Errors: `ERR bloom object decoding failed` (empty blob, bad bincode, bad sub-filter bytes), `ERR bloom object decoding failed. Unsupported version` (first byte != 1), and the range or limit errors listed in 10.3.
 - Not intended for clients. `must_obey_client` skips the size-limit validation when it comes from AOF or a replica.
-- **HCache only:** from a client (not from a primary), a blob with more than 4096 sub-filters gets `ERR bloom object reached max number of filters`, and a blob whose tightened error rate falls below the smallest double at some sub-filter gets `ERR bloom object decoding failed` (the check RDB loading already makes). Every check and add looks at each sub-filter, and a blob costs nothing to make, unlike the hundreds of thousands of adds that grow a real filter that far. valkey-bloom takes up to `i32::MAX`.
+- **Hotstash only:** from a client (not from a primary), a blob with more than 4096 sub-filters gets `ERR bloom object reached max number of filters`, and a blob whose tightened error rate falls below the smallest double at some sub-filter gets `ERR bloom object decoding failed` (the check RDB loading already makes). Every check and add looks at each sub-filter, and a blob costs nothing to make, unlike the hundreds of thousands of adds that grow a real filter that far. valkey-bloom takes up to `i32::MAX`.
 
 ---
 
@@ -334,7 +334,7 @@ FIXED_SEED = [89,15,245,34,234,120,17,218,167,20,216,9,59,62,123,217,29,137,138,
 - `BF.INSERT ... SEED <32 raw bytes>` sets an explicit seed. The object is marked `is_seed_random = (seed != FIXED_SEED)`.
 - Sub-filters created by scale-out reuse the first filter's seed (`VB: utils.rs:346-351`).
 - The seed travels in the replication stream (section 11) and in the RDB as part of each sub-filter's bitmap header.
-- For HCache, byte-exact answers need `bf.bloom-use-random-seed no`. In random mode only the statistical error rate is comparable (the tests accept an observed fp rate under `p + 0.002`).
+- For Hotstash, byte-exact answers need `bf.bloom-use-random-seed no`. In random mode only the statistical error rate is comparable (the tests accept an observed fp rate under `p + 0.002`).
 
 ### 7.4 Memory limit (`VB: src/configs.rs:33-38`, `src/bloom/utils.rs:200-221`)
 - `bf.bloom-memory-usage-limit`, default **134217728 (128 MiB)**, range 0..i64::MAX, runtime-settable. Docs example text shows 268435456. The source default is 128 MiB.
@@ -359,13 +359,13 @@ memory_usage        = 48 (BloomObject) + 8 * vec_capacity + sum over filters of 
 - The `nbytes` term counts only the bit array, `bloom.len()/8`. The 45-byte crate header (section 10.2) is *not* counted (`VB: utils.rs:668-672`).
 - `vec_capacity` is the allocated capacity of the `Vec` of filters: 1 filter gives 1, 2..4 filters give 4, 5..8 give 8, then 16, 32, ... (Rust `Vec` growth from a vec created with capacity 1). A BF.LOAD or RDB-loaded object starts with capacity 1 too, so it grows the same way.
 - Worked: default filter 384; `BF.RESERVE k 0.01 1000` 1463; `0.001 1000` 2062; `0.5 2000` 625; `0.001 10000` 18236 (`DERIVED`, X).
-- After scaling the default filter to 2 sub-filters, Size is 892 (`DERIVED`: `48 + 8*4 + (208+120) + (208+276)`). A HCache implementation need not match the byte count of its own memory use, but should return these numbers for `SIZE` if clients compare.
+- After scaling the default filter to 2 sub-filters, Size is 892 (`DERIVED`: `48 + 8*4 + (208+120) + (208+276)`). A Hotstash implementation need not match the byte count of its own memory use, but should return these numbers for `SIZE` if clients compare.
 
 ### 8.2 MEMORY USAGE
 `MEMORY USAGE key` calls the type's `mem_usage` callback (the same `memory_usage()`, `VB: src/wrapper/bloom_callback.rs:110-113`) and the server adds its own key overhead (server knowledge). So `MEMORY USAGE >= BF.INFO SIZE` (`TEST: tests/test_bloom_basic.py:51-56`).
 
 ### 8.3 INFO module section
-`INFO bf` (also in `INFO modules`) prints two sections: core metrics `bloom_total_memory_bytes`, `bloom_num_objects`, `bloom_num_filters_across_objects`, `bloom_num_items_across_objects`, `bloom_capacity_across_objects` and defrag metrics `bloom_defrag_hits`, `bloom_defrag_misses`. The server prefixes them with the module name, so the lines read `bf_bloom_total_memory_bytes:...` (`VB: src/metrics.rs:15-60`, `TEST: tests/valkey_bloom_test_case.py:verify_bloom_metrics`). HCache can add them cheaply; they are optional for client compatibility.
+`INFO bf` (also in `INFO modules`) prints two sections: core metrics `bloom_total_memory_bytes`, `bloom_num_objects`, `bloom_num_filters_across_objects`, `bloom_num_items_across_objects`, `bloom_capacity_across_objects` and defrag metrics `bloom_defrag_hits`, `bloom_defrag_misses`. The server prefixes them with the module name, so the lines read `bf_bloom_total_memory_bytes:...` (`VB: src/metrics.rs:15-60`, `TEST: tests/valkey_bloom_test_case.py:verify_bloom_metrics`). Hotstash can add them cheaply; they are optional for client compatibility.
 
 ---
 
@@ -381,7 +381,7 @@ Names are `bf.<name>` (module name `bf`). All are registered with default flags:
 | `bf.bloom-tightening-ratio` | string | `"0.5"` | parses as f64 and 0 < x < 1 | tightening ratio for new objects (also BF.RESERVE) |
 | `bf.bloom-memory-usage-limit` | int | 134217728 | 0..i64::MAX | per-object memory limit (7.4) |
 | `bf.bloom-use-random-seed` | bool | yes | yes/no | random vs fixed seed (7.3) |
-| `bf.bloom-defrag-enabled` | bool | yes | yes/no | active defrag callback (not relevant to HCache) |
+| `bf.bloom-defrag-enabled` | bool | yes | yes/no | active defrag callback (not relevant to Hotstash) |
 
 - CONFIG SET errors: `ERR Invalid floating-point value` for a non-float, and `ERR (0 < error rate range < 1)` or `ERR (0 < tightening ratio range < 1)` for out of range, as the server reports `CONFIG SET failed (possibly related to argument 'bf.bloom-fp-rate') - ERR (0 < error rate range < 1)` (`TEST: test_bloom_basic.py:185-196`). `CONFIG GET bf.bloom-fp-rate` returns the string as set (`0.1`).
 - Config changes apply only to objects created afterwards (docs, and `TEST: test_bloom_basic.py:198-212` and `test_deterministic_replication`).
@@ -397,7 +397,7 @@ Names are `bf.<name>` (module name `bf`). All are registered with default flags:
 - `OBJECT ENCODING key` returns **`raw`** (the server default for module values; `TEST: same`).
 - `DEL`, `UNLINK`, `EXPIRE`/`TTL`/`PERSIST`, `RENAME`, `TOUCH`, `RANDOMKEY`, `FLUSHALL`, MULTI/EXEC and Lua `redis.call('BF.ADD', ...)` all work as for any key (`TEST: test_bloom_basic.py`).
 - `COPY src dst` calls the type's `copy` callback: a deep copy of every sub-filter, bitmaps and counters, with the same seed. `DEBUG DIGEST-VALUE` is equal on both (`VB: bloom_callback.rs:117-126`, `utils.rs:158-174`).
-- `DEBUG DIGEST-VALUE` hashes `expansion, fp_rate (LE 8 bytes), tightening_ratio (LE), is_seed_random`, then per filter the full bitmap bytes (including the crate header), `num_items`, `capacity` (`VB: data_type.rs:140-152`). HCache can define any digest, but the same state must give the same digest after COPY, DUMP/RESTORE and replication.
+- `DEBUG DIGEST-VALUE` hashes `expansion, fp_rate (LE 8 bytes), tightening_ratio (LE), is_seed_random`, then per filter the full bitmap bytes (including the crate header), `num_items`, `capacity` (`VB: data_type.rs:140-152`). Hotstash can define any digest, but the same state must give the same digest after COPY, DUMP/RESTORE and replication.
 
 ### 10.2 RDB save and DUMP / RESTORE
 - Module type name `bloomfltr`, **encver 1** (`BLOOM_TYPE_ENCODING_VERSION = 1`, `VB: data_type.rs:16`). In the DUMP/RDB module id this encodes as `0x6e5a2899f96dac01` (name `bloomfltr` in the 6-bit charset `A-Za-z0-9-_`, then 10-bit encver 1). `DERIVED`, and it matches the 8 bytes `6e 5a 28 99 f9 6d ac 01` in the upstream test's sample dump (`TEST: test_bloom_basic.py:test_bloom_dump_and_restore`).
@@ -443,7 +443,7 @@ Vec           : u64 length prefix, then the elements
 ```
 (`VB: utils.rs:90-98,372-382,565-574`; bincode 1.3 layout is standard knowledge, not in the tarball.) Decode validates expansion in range, fp in (0,1), tightening in (0,1) (reporting the error-rate message for tightening, see section 4), `filters.len() < i32::MAX`, and the memory limit (skipped for AOF or replication clients).
 
-An AOF rewrite or RDB persist is only required for HCache if it wants to interoperate. For HCache's own persistence any stable encoding will do, as long as the whole state (seed, per-filter capacity, num_items, expansion, fp, tightening, bitmaps) survives.
+An AOF rewrite or RDB persist is only required for Hotstash if it wants to interoperate. For Hotstash's own persistence any stable encoding will do, as long as the whole state (seed, per-filter capacity, num_items, expansion, fp, tightening, bitmaps) survives.
 
 ---
 
@@ -465,7 +465,7 @@ Details:
 - Replica-side commands are applied with `must_obey_client`, so the memory-limit checks are skipped.
 - BF.RESERVE on the primary becomes a `BF.INSERT` without `ITEMS` on the replica. Test counts: primary 1 reserve, replica 1 `BF.INSERT` (`TEST: test_bloom_replication.py`).
 - A failed command or an `item exists` reply is never replicated.
-- **Probable upstream bug:** BF.LOAD sets the replication items to `&input_args[idx..]`, which is the dump blob itself (`VB: command_handler.rs:827-834`). So BF.LOAD on a primary would be replicated as a `BF.INSERT` that adds the blob as an *item* to a fresh default-capacity filter, not as a restore. It only matters if clients call BF.LOAD manually (AOF load is not replicated). A HCache reimplementation should replicate BF.LOAD verbatim, or as BF.LOAD, and treat this as a deliberate deviation.
+- **Probable upstream bug:** BF.LOAD sets the replication items to `&input_args[idx..]`, which is the dump blob itself (`VB: command_handler.rs:827-834`). So BF.LOAD on a primary would be replicated as a `BF.INSERT` that adds the blob as an *item* to a fresh default-capacity filter, not as a restore. It only matters if clients call BF.LOAD manually (AOF load is not replicated). A Hotstash reimplementation should replicate BF.LOAD verbatim, or as BF.LOAD, and treat this as a deliberate deviation.
 
 ### 11.2 Keyspace notifications (`VB: src/bloom/utils.rs:15-17`, `command_handler.rs:151-156`)
 Class `GENERIC` (so the `g` flag, or `A` / `KEA`, must be enabled in `notify-keyspace-events`).
@@ -481,7 +481,7 @@ Class `GENERIC` (so the `g` flag, or `A` / `KEA`, must be enabled in `notify-key
 
 ---
 
-## 12. Implementation order for HCache
+## 12. Implementation order for Hotstash
 
 1. `bloomfltr` type with: base fp, tightening, expansion, seed (32 bytes), `Vec<SubFilter {capacity, num_items, k, bits, bitmap}>`.
 2. Per-filter sizing (7.1) and the hash (7.2). Write unit tests against the worked bit offsets, but remember those are simulated (X).
@@ -491,7 +491,7 @@ Class `GENERIC` (so the `g` flag, or `A` / `KEA`, must be enabled in `notify-key
 6. Errors (section 4) and the check order (2.4).
 7. Memory accounting for `SIZE` and the limit (section 8, 7.4).
 8. Replication rewrite and the two keyspace events (section 11).
-9. Persistence (DUMP/RESTORE/RDB/AOF) with the layouts in section 10, or HCache's own encoding.
+9. Persistence (DUMP/RESTORE/RDB/AOF) with the layouts in section 10, or Hotstash's own encoding.
 10. ACL category `@bloom`, command flags and key specs (section 1), `TYPE` and `OBJECT ENCODING` strings.
 
 ---
@@ -535,7 +535,7 @@ Compatibility note: valkey-bloom documents API compatibility with the valkey-py,
 
 ---
 
-## 14. Gaps between source and docs (do not "fix" these in HCache)
+## 14. Gaps between source and docs (do not "fix" these in Hotstash)
 
 - valkey.io `BF.INFO` syntax omits `ITEMS`, but the code accepts it.
 - valkey.io's memory-limit example shows 268435456, while the source default is 134217728.
@@ -655,14 +655,14 @@ Each vector runs on an empty database with default configs unless stated. Notati
 
 ## 16. What I could not determine
 
-1. **Wire formatting of tiny doubles in RESP2** (for example `BF.INFO k ERROR` with 1e-17). The module sends a double and the server formats it. Tests only show values such as `0.5`, `0.0001`, `0.75`, `0.01`. HCache should reuse whatever formatter it already uses for ZSCORE, which should be the Valkey one.
+1. **Wire formatting of tiny doubles in RESP2** (for example `BF.INFO k ERROR` with 1e-17). The module sends a double and the server formats it. Tests only show values such as `0.5`, `0.0001`, `0.75`, `0.01`. Hotstash should reuse whatever formatter it already uses for ZSCORE, which should be the Valkey one.
 2. **Exact server framing of `-ERROR`** (bare). It follows from `ReplyWithError("ERROR")` and the server's rule about messages that already start with a code word (server knowledge, not in the tarball).
 3. **Whether the arity -1 holds for BF.LOAD.** The upstream test checks 8 commands; BF.LOAD is inferred.
 4. **Rust struct sizes (48/8/24/184)** are inferred from the 384 test constant, not read from a compiler. If the module is rebuilt with different layouts, `BF.INFO SIZE` changes, and so does the memory-limit boundary (these constants shift `MAXSCALEDCAPACITY` by a small amount only; the reproduced 26214300, 32766000, 20470000, 1627600 and 101600 values all match).
 5. **The length prefix of `Hash for [u8]`** (usize LE) is from Rust std knowledge. I could not read the std source here. The 384-style constants cannot prove it. A real-module bit-offset check, for example from a known bitmap in a RESTORE payload, is the only way to confirm the worked offsets in 7.2.
 6. **Real-module confirmation of every X vector** (66, 68, 69, 53). No module could be built here (no clang), so false-positive positions and Sizes after scaling come from my reimplementation.
 7. **`MEMORY USAGE` key overhead** and the exact value for a given filter.
-8. **The bincode layout used by BF.LOAD/AOF** is standard bincode 1.3, but I did not decode a real blob. Not needed for HCache unless it wants AOF compatibility with valkey-bloom.
+8. **The bincode layout used by BF.LOAD/AOF** is standard bincode 1.3, but I did not decode a real blob. Not needed for Hotstash unless it wants AOF compatibility with valkey-bloom.
 9. **The exact RDB/DUMP bytes** around the module opcodes (the primitive sequence is known, the surrounding Valkey RDB framing was not read). The type id `0x6e5a2899f96dac01` was derived and matches the one sample dump.
 10. **Unreleased changes on valkey-bloom's main branch.** I read tag `1.0.1` only.
 11. **`src/bloom/utils.rs` unit tests beyond line 760** were not read (they are internal tests, not behaviour documentation).

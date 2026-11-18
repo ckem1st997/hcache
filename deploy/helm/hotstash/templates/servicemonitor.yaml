@@ -1,0 +1,24 @@
+{{- if and .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "hotstash.fullname" . }}
+  labels:
+    {{- include "hotstash.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "hotstash.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+      {{- $secret := .Values.metrics.serviceMonitor.authSecret | default (include "hotstash.secretName" .) }}
+      basicAuth:
+        username:
+          name: {{ $secret }}
+          key: username
+        password:
+          name: {{ $secret }}
+          key: password
+{{- end }}

@@ -1,5 +1,5 @@
 [package]
-name = "hcache-rust-compat"
+name = "hotstash-rust-compat"
 version = "0.1.0"
 edition = "2021"
 

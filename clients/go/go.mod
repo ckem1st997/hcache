@@ -1,4 +1,4 @@
-module hcache-client-go
+module hotstash-client-go
 
 go 1.26.0
 

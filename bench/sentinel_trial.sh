@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# A real Valkey Sentinel managing three nodes, HCache or Valkey: discovery,
+# A real Valkey Sentinel managing three nodes, Hotstash or Valkey: discovery,
 # automatic failover when the primary dies, the old primary turned into a
 # replica when it comes back, SENTINEL FAILOVER, and SENTINEL FAILOVER
 # COORDINATED (CLIENT PAUSE and FAILOVER TO in one transaction). Each step
 # prints PASS or FAIL; the Sentinel events follow.
 #
-# Usage: bench/sentinel_trial.sh hcache|valkey VALKEY_SRC [HCACHE_SERVER]
+# Usage: bench/sentinel_trial.sh hotstash|valkey VALKEY_SRC [HOTSTASH_SERVER]
 #   VALKEY_SRC: a directory with valkey-server, valkey-sentinel, valkey-cli.
 # Ports 7500-7502 (nodes) and 7510-7512 (Sentinels) on 127.0.0.1.
 set -uo pipefail
 TYPE=$1
 V=$2
 H=${3:-}
-W=${WORK:-/tmp/hcache-sentinel-$TYPE}
+W=${WORK:-/tmp/hotstash-sentinel-$TYPE}
 CLI="$V/valkey-cli"
 NODES="7500 7501 7502"
 SENTS="7510 7511 7512"
 S="$CLI -p 7510"
 PIDS=()
-[ "$TYPE" = hcache ] && [ -z "$H" ] && { echo "hcache needs HCACHE_SERVER"; exit 2; }
+[ "$TYPE" = hotstash ] && [ -z "$H" ] && { echo "hotstash needs HOTSTASH_SERVER"; exit 2; }
 rm -rf "$W"
 mkdir -p "$W"
 
@@ -34,7 +34,7 @@ declare -A NODE_PID
 start_node() {
     local p=$1
     mkdir -p "$W/n$p"
-    if [ "$TYPE" = hcache ]; then
+    if [ "$TYPE" = hotstash ]; then
         "$H" --bind 127.0.0.1 --port "$p" --workers 2 >>"$W/n$p/log" 2>&1 &
     else
         "$V/valkey-server" --bind 127.0.0.1 --port "$p" --save "" --appendonly no \

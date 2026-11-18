@@ -1,4 +1,4 @@
-"""HCache spike against redis-py. Every check runs; nothing aborts the run.
+"""Hotstash spike against redis-py. Every check runs; nothing aborts the run.
 
 Checks named x_* use Redis features outside the spike's scope; they show
 what a real application would hit, they are not expected to pass.
@@ -10,11 +10,11 @@ import time
 
 import redis
 
-PORT = int(os.environ.get("HCACHE_PORT", "6400"))
-# HCACHE_PROTO=2 forces RESP2; unset means the library's default handshake.
-PROTO = os.environ.get("HCACHE_PROTO")
-# HCACHE_TLS_CA=<ca file> connects with TLS and checks the server against it.
-TLS_CA = os.environ.get("HCACHE_TLS_CA")
+PORT = int(os.environ.get("HOTSTASH_PORT", "6400"))
+# HOTSTASH_PROTO=2 forces RESP2; unset means the library's default handshake.
+PROTO = os.environ.get("HOTSTASH_PROTO")
+# HOTSTASH_TLS_CA=<ca file> connects with TLS and checks the server against it.
+TLS_CA = os.environ.get("HOTSTASH_TLS_CA")
 TLS = {"ssl": True, "ssl_ca_certs": TLS_CA} if TLS_CA else {}
 KW = dict({"protocol": int(PROTO)} if PROTO else {}, **TLS)
 P = "py:"

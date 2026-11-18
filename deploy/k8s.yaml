@@ -1,20 +1,20 @@
-# HCache on Kubernetes or k3s: one replica keeping its data on a volume.
+# Hotstash on Kubernetes or k3s: one replica keeping its data on a volume.
 # The password comes from a Secret made beforehand:
 #
-#   kubectl create secret generic hcache --from-literal=password=...
+#   kubectl create secret generic hotstash --from-literal=password=...
 #   kubectl apply -f deploy/k8s.yaml
 #
 # The image is the one CI publishes from the main branch; for your own
 # build, change `image` below to where you pushed it.
-# Only pods labelled hcache-client: "true" may connect (NetworkPolicy, where
+# Only pods labelled hotstash-client: "true" may connect (NetworkPolicy, where
 # the cluster's network plugin enforces it; k3s does by default).
 apiVersion: v1
 kind: Service
 metadata:
-  name: hcache
+  name: hotstash
 spec:
   selector:
-    app: hcache
+    app: hotstash
   ports:
     - name: resp
       port: 6379
@@ -23,17 +23,17 @@ spec:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: hcache
+  name: hotstash
 spec:
-  serviceName: hcache
+  serviceName: hotstash
   replicas: 1
   selector:
     matchLabels:
-      app: hcache
+      app: hotstash
   template:
     metadata:
       labels:
-        app: hcache
+        app: hotstash
     spec:
       # SIGTERM gets 20 s to write everything to disk; this leaves room.
       terminationGracePeriodSeconds: 60
@@ -46,15 +46,15 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: hcache
-          image: ghcr.io/ckem1st997/hcache:latest
+        - name: hotstash
+          image: ghcr.io/ckem1st997/hotstash:latest
           imagePullPolicy: Always
-          args: ["--bind", "0.0.0.0", "--data", "/data/hcache.aof"]
+          args: ["--bind", "0.0.0.0", "--data", "/data/hotstash.aof"]
           env:
-            - name: HCACHE_REQUIREPASS
+            - name: HOTSTASH_REQUIREPASS
               valueFrom:
                 secretKeyRef:
-                  name: hcache
+                  name: hotstash
                   key: password
           ports:
             - name: resp
@@ -76,19 +76,19 @@ spec:
               drop: ["ALL"]
           readinessProbe:
             exec:
-              command: ["/usr/local/bin/hcache-server", "healthcheck"]
+              command: ["/usr/local/bin/hotstash-server", "healthcheck"]
             periodSeconds: 5
             timeoutSeconds: 3
           livenessProbe:
             exec:
-              command: ["/usr/local/bin/hcache-server", "healthcheck"]
+              command: ["/usr/local/bin/hotstash-server", "healthcheck"]
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 6
           # Loading a large append-only file takes a while.
           startupProbe:
             exec:
-              command: ["/usr/local/bin/hcache-server", "healthcheck"]
+              command: ["/usr/local/bin/hotstash-server", "healthcheck"]
             periodSeconds: 2
             failureThreshold: 300
           # The endpoint goes before the process stops taking connections.
@@ -111,16 +111,16 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: hcache
+  name: hotstash
 spec:
   podSelector:
     matchLabels:
-      app: hcache
+      app: hotstash
   policyTypes: ["Ingress"]
   ingress:
     - from:
         - podSelector:
             matchLabels:
-              hcache-client: "true"
+              hotstash-client: "true"
       ports:
         - port: 6379

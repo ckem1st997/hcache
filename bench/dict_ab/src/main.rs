@@ -1,12 +1,12 @@
 //! The chained dict used before the bucket one (`old_dict.rs`, kept here
-//! only for this comparison) against the current `hcache-core` dict, alone:
+//! only for this comparison) against the current `hotstash-core` dict, alone:
 //! build time, final and peak memory, lookups in random order (hits with
 //! the server's two-step prefetch over batches of 16, hits without, misses,
 //! hits on keys with a deadline). Run on Linux:
 //! `cargo run --release -- 100000 1000000 4000000`.
 #![allow(dead_code)]
 
-#[path = "../../../crates/hcache-core/src/dict.rs"]
+#[path = "../../../crates/hotstash-core/src/dict.rs"]
 mod new_dict;
 #[path = "old_dict.rs"]
 mod old_dict;

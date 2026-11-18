@@ -1,0 +1,14 @@
+[package]
+name = "hotstash"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+hotstash-core = { path = "../hotstash-core" }
+hotstash-server = { path = "../hotstash-server" }
+
+[dev-dependencies]
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

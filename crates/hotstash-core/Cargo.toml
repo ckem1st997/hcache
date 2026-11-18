@@ -1,0 +1,18 @@
+[package]
+name = "hotstash-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+parking_lot = "0.12"
+crossbeam-queue = "0.3"
+crossbeam-utils = "0.8"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+memchr = "2"
+sha1_smol = "1"
+mlua = { version = "0.10", features = ["lua51", "vendored", "send"] }
+sha2 = "0.10"
+getrandom = "0.2"
+mimalloc = { version = "0.1", default-features = false }

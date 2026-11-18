@@ -1,4 +1,4 @@
-# HCache sentinel mode: implementation spec (reference: Valkey 9.1.3 `src/sentinel.c`)
+# Hotstash sentinel mode: implementation spec (reference: Valkey 9.1.3 `src/sentinel.c`)
 
 Reference tree: `valkey-9.1.3/src/`. Every `sentinel.c:N` reference below was checked against the file (5479 lines). Other files are cited as `server.c:N`, `networking.c:N`, `pubsub.c:N`, `replication.c:N`, `config.c:N`, `server.h:N`, `commands/<name>.json`.
 
@@ -156,7 +156,7 @@ Reply acceptance for PING (`sentinelPingReplyCallback`, `sentinel.c:2717-2749`):
 - A `PONG` also clears `SRI_PRIMARY_REBOOT` (`sentinel.c:2734`).
 - Any other reply: if it starts with `BUSY` and the instance is `S_DOWN` and `SCRIPT_KILL_SENT` is unset, send `SCRIPT KILL` and set the flag (`sentinel.c:2739-2745`).
 - `last_pong_time = now` for every reply of any type (`sentinel.c:2748`).
-- A bulk-string PONG would not count. HCache must answer PING with `+PONG` in RESP2.
+- A bulk-string PONG would not count. Hotstash must answer PING with `+PONG` in RESP2.
 
 ### 2.4 TILT (`sentinel.c:5452-5463`)
 
@@ -293,7 +293,7 @@ There are no other "failover-related" sentinel to sentinel messages: election is
 | Post-promotion cleanup (coordinated) **[V9]** | `MULTI`, `CONFIG REWRITE`, `CLIENT KILL TYPE normal`, `CLIENT KILL TYPE pubsub`, `CLIENT UNPAUSE`, `EXEC` | old primary and promoted replica | 4822-4853, 2624-2627 |
 
 Notes:
-- The reconfiguration command is the literal word **`SLAVEOF`**, not `REPLICAOF` (`sentinel.c:4908`). HCache must accept `SLAVEOF host port` and `SLAVEOF NO ONE`.
+- The reconfiguration command is the literal word **`SLAVEOF`**, not `REPLICAOF` (`sentinel.c:4908`). Hotstash must accept `SLAVEOF host port` and `SLAVEOF NO ONE`.
 - `SLAVEOF NO ONE` is built as host `NO` + port `ONE` (`sentinel.c:4875-4878`).
 - `host` is `announceSentinelAddr(addr)`, i.e. hostname if `announce-hostnames yes`, else IP.
 - The `FAILOVER ABORT` line is sent only when the instance reported a failover state (`monitored_instance_failover_state == FAILOVER`) (`sentinel.c:4900-4905`). **[V9]**
@@ -326,7 +326,7 @@ The reply is split on `\r\n` (`sentinel.c:2454`) and the whole text is cached fo
 | `replica_announced:<0/1>` | same | 0 hides the replica from `SENTINEL REPLICAS` | 1 | 2566 |
 | `master_failover_state:<s>` **[V9]** | any role | `no-failover` means "supported, idle"; **any other value means "failover ongoing"**; absent means "not supported" and `SENTINEL FAILOVER ... COORDINATED` is refused | not supported | 2570-2576, 3931 |
 
-Order dependency: the replica-only fields are honoured only after a `role:slave` line has been seen in the same reply (`role` is a running variable, `sentinel.c:2532`). `role:` is the first line of the `# Replication` section, so the usual layout works. HCache must emit `role:` before `master_host:` etc.
+Order dependency: the replica-only fields are honoured only after a `role:slave` line has been seen in the same reply (`role` is a running variable, `sentinel.c:2532`). `role:` is the first line of the `# Replication` section, so the usual layout works. Hotstash must emit `role:` before `master_host:` etc.
 
 `info_refresh = now` after parsing (`sentinel.c:2578`).
 
@@ -785,7 +785,7 @@ Scheduled with `sentinelScheduleScriptExecution` (up to 16 args, queue limit 256
 
 ---
 
-## 13. HCache implementation checklist
+## 13. Hotstash implementation checklist
 
 ### (a) To be monitored (and managed) by a Valkey sentinel
 
@@ -809,7 +809,7 @@ Scheduled with `sentinelScheduleScriptExecution` (up to 16 args, queue limit 256
 4. Persist `myid` (40 hex), `current-epoch`, per-primary `config-epoch`, `leader-epoch`, known replicas/sentinels, in the config file with the line formats of 10.1; read them back at load.
 5. Epochs and votes: `sentinelVoteLeader` rules (7.2), majority `max(quorum, voters/2+1)` (7.3), `failover_epoch = ++current_epoch`, `failover_start_time = now + rand(0..999)`, retry gate `2 * failover_timeout`, election timeout `min(10000, failover_timeout)`.
 6. SDOWN/ODOWN rules (section 6) with the same numbers, including the `ask_period * 5` staleness clear and TILT.
-7. Failover state machine and replica selection (sections 8-9), using `SLAVEOF`-based transactions so that Valkey and HCache data nodes both behave. The coordinated path (`FAILOVER TO`) **[V9]** is optional; without it, `SENTINEL FAILOVER name COORDINATED` should simply not be offered.
+7. Failover state machine and replica selection (sections 8-9), using `SLAVEOF`-based transactions so that Valkey and Hotstash data nodes both behave. The coordinated path (`FAILOVER TO`) **[V9]** is optional; without it, `SENTINEL FAILOVER name COORDINATED` should simply not be offered.
 8. Event publication (section 12) with exact payloads, because clients and tooling parse `+switch-master`, `+sdown`, `+odown`, `+failover-end`.
 
 ---
@@ -824,12 +824,12 @@ Scheduled with `sentinelScheduleScriptExecution` (up to 16 args, queue limit 256
 
 ## 14. Findings from live tests
 
-Live tests of Valkey Sentinel 9.1.3 (3 Sentinels, quorum 2, down-after 2000 ms) against HCache nodes, 2026-11-17. Full detail in `sentinel-trial.md`. These findings define what a data node must do to be managed (section 13a) and confirm the behaviour described above.
+Live tests of Valkey Sentinel 9.1.3 (3 Sentinels, quorum 2, down-after 2000 ms) against Hotstash nodes, 2026-11-17. Full detail in `sentinel-trial.md`. These findings define what a data node must do to be managed (section 13a) and confirm the behaviour described above.
 
 - Confirmed on the wire: the 8-field hello payload (for example `127.0.0.1,7510,<runid>,2,mymaster,127.0.0.1,7500,0`) published every 2 s to the primary and every replica by every Sentinel, one `SUBSCRIBE __sentinel__:hello` per Sentinel per node, `CLIENT SETNAME sentinel-<runid8>-cmd|-pubsub` on both links, `PING` about every second, plain `INFO` every 10 s.
-- Confirmed: role-change commands are sent as one `MULTI`, `SLAVEOF host port|NO ONE`, `CONFIG REWRITE`, `CLIENT KILL TYPE normal`, `CLIENT KILL TYPE pubsub`, `EXEC` block with replies ignored (`sentinel.c:4868-4935`). A node that refuses any line (HCache refuses `CLIENT KILL` at queue time and `SLAVEOF` at `EXEC`) leaves the failover stuck in `wait-promotion` until `-failover-abort-slave-timeout` after `failover-timeout`, then retried after `2 x failover-timeout`.
-- Confirmed: an empty `run_id` (HCache `INFO` has none) leaves `runid` blank in `SENTINEL master|replicas` and does not prevent SDOWN, ODOWN, election (`+vote-for-leader`, `+elected-leader`) or `+selected-slave`.
+- Confirmed: role-change commands are sent as one `MULTI`, `SLAVEOF host port|NO ONE`, `CONFIG REWRITE`, `CLIENT KILL TYPE normal`, `CLIENT KILL TYPE pubsub`, `EXEC` block with replies ignored (`sentinel.c:4868-4935`). A node that refuses any line (Hotstash refuses `CLIENT KILL` at queue time and `SLAVEOF` at `EXEC`) leaves the failover stuck in `wait-promotion` until `-failover-abort-slave-timeout` after `failover-timeout`, then retried after `2 x failover-timeout`.
+- Confirmed: an empty `run_id` (Hotstash `INFO` has none) leaves `runid` blank in `SENTINEL master|replicas` and does not prevent SDOWN, ODOWN, election (`+vote-for-leader`, `+elected-leader`) or `+selected-slave`.
 - Timings seen with Valkey nodes: `+sdown` 2.1 s after the kill, `+odown` within 0.1 s, `+switch-master` 2.2 s later (4 s total from the kill to the new address).
 - TILT: a host stall over 2 s put all three Sentinels in TILT for 30 s (`+tilt`/`-tilt`), during which no SDOWN, election or failover step ran; an election started right after TILT found no usable replica (`-failover-abort-no-good-slave`) because replica INFO was stale. An implementation must keep this rule (section 6) or it will misbehave on a stalled host.
-- Not exercised: a mixed quorum of HCache and Valkey Sentinels, `is-master-down-by-addr` between implementations, coordinated failover.
+- Not exercised: a mixed quorum of Hotstash and Valkey Sentinels, `is-master-down-by-addr` between implementations, coordinated failover.
 
